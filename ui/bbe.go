@@ -63,11 +63,11 @@ func (b *BitboxEditor) beforeDestroyContext() {
 func (b *BitboxEditor) beforeRender() {}
 func (b *BitboxEditor) afterRender() {
 	b.backend.Refresh()
-	//imgui.UpdatePlatformWindows()sucks
+	//imgui.UpdatePlatformWindows()
 	//imgui.RenderPlatformWindowsDefault()
 }
 func (b *BitboxEditor) close() {
-	//b.backend.SetShouldClose(true)
+	b.backend.SetShouldClose(true)
 }
 func (b *BitboxEditor) onDrop(files []string) {
 	fmt.Println("Dropped files: ", files)
@@ -144,23 +144,33 @@ func (b *BitboxEditor) menu() {
 	if imgui.BeginMainMenuBar() {
 
 		if imgui.BeginMenu("File") {
+			if imgui.MenuItemBoolV(
+				"Exit",
+				"CTRL+Q",
+				false,
+				true) {
+
+				b.close()
+
+			}
+
 			imgui.EndMenu()
 		}
 
-		if imgui.BeginMenu("View") {
-			imgui.EndMenu()
-		}
-
-		if imgui.BeginMenu("Window") {
-
+		if imgui.BeginMenu("Edit") {
 			if imgui.MenuItemBoolV(
 				"Settings",
-				"ALT+2",
-				b.Window.SettingsWindow.IsOpen(),
+				"CTRL+ALT+S",
+				false,
 				true) {
 
 				b.Window.SettingsWindow.Open()
 			}
+
+			imgui.EndMenu()
+		}
+
+		if imgui.BeginMenu("Window") {
 
 			if imgui.MenuItemBoolV(
 				"NewConsoleWindow",
@@ -264,7 +274,10 @@ func (b *BitboxEditor) loop() {
 
 	// Layout windows
 	b.Window.ConsoleWindow.Build()
-	b.Window.SettingsWindow.Build()
+
+	if b.Window.SettingsWindow.IsOpen() {
+		b.Window.SettingsWindow.Build()
+	}
 }
 
 func (b *BitboxEditor) Run() {
