@@ -70,24 +70,14 @@ pre-submodule-update:
 	find resources/fonticons/ -type f -iname '*.go' -exec rm -v {} \;
 	@echo
 
-banner:
-	@echo
-	@echo "${INVERT}  ${BG_LIGHTPURPLE}             ${RESET}${INVERT}  ${RESET}"
-	@echo "${INVERT}  ${BG_LIGHTPURPLE}    •        ${RESET}${INVERT}  ${RESET}"
-	@echo "${INVERT}  ${BG_LIGHTPURPLE} ┏┓┏┓┓┏┏┳┓┏┓ ${RESET}${INVERT}  ${RESET}"
-	@echo "${INVERT}  ${BG_LIGHTPURPLE} ┣┛┛ ┗┛┛┗┗┗┻ ${RESET}${INVERT}  ${RESET}"
-	@echo "${INVERT}  ${BG_LIGHTPURPLE} ┛           ${RESET}${INVERT}  ${RESET}"
-	@echo "${INVERT}  ${BG_LIGHTPURPLE}             ${RESET}${INVERT}  ${RESET}"
-	@echo
-
-help: banner ## Show this screen
+help: ## Show this screen
 	@echo "Run ${BOLD}${LIGHTPURPLE}make help${RESET}${RESET} for a list of commands."
 	@echo
 	@grep -E '^[a-zA-Z_0-9%-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "${TARGET_COLOR}%-30s${RESET} %s\n", $$1, $$2}'
 	@echo
 
 
-update-font-icons: banner ## Download fonts, generate headers and move files to src.
+update-font-icons: ## Download fonts, generate headers and move files to src.
 	@echo "${BG_LIGHTPURPLE}Copying GenerateIconFontCppHeaders.py as module locally ...${RESET}";
 	@grep -irn "# Main" thirdparty/IconFontCppHeaders/GenerateIconFontCppHeaders.py | awk -F ":" '{print "cat thirdparty/IconFontCppHeaders/GenerateIconFontCppHeaders.py | head -n " $$1 " > scripts/icon_font_cpp_headers.py"}' | sh -v;
 	@touch scripts/__init__.py
@@ -113,7 +103,7 @@ build-clean: ## Clean up build directory contents
 	@echo "${BG_LIGHTPURPLE}Cleaning up previous builds ...${RESET}";
 	find build/ -type f -exec rm -v {} \;
 
-build: banner build-init build-clean ## Build the project
+build: build-init build-clean ## Build the project
 	@echo "${BG_LIGHTPURPLE}Building from src ...${RESET}";
 	@go build -o build/bbe src/main.go
 
