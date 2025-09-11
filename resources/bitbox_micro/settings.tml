@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document>
+    <settings>
+        <params scrbrightness="1000" scrbrightfine="0" midiglobchan="17" midikeysglobchan="0" headphvol="800" globcomp="1" metroopts="1" metoutbus="17" metgain="0" midircvprogchng="0" recparmsperpad="0" recautoplay="1" midikeyrec="0" reccountdown="1" recpresetlen="0" recquant="3" recmonmode="1" recinput="0" recusethres="0" recthresh="-20000" ingain="0" recmonoutbus="0" uiflip="0" mrstartnote="36" mrendnote="84" mrstride="1" mrvellayers="1" mrmaxvel="100" mrnotelen="5" mrrellen="2" mrecmidich="1" clockinppq="2" clockoutppq="2" midithrumodetype="1" midiusbouten="0" sdsafemode="0"/>
+        <preset name="SL Analog Drive Kit"/>
+    </settings>
+</document>

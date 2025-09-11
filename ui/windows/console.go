@@ -18,8 +18,11 @@ var (
 
 type ConsoleWindow struct {
 	*Window
+
 	tableId    string
 	tableFlags imgui.TableFlags
+
+	scrollToBottom bool
 }
 
 func (w *ConsoleWindow) onLogEvent(ctx context.Context, e events.LogRecord) {
@@ -85,9 +88,20 @@ func (w *ConsoleWindow) Layout() {
 				imgui.PopFont()
 			}
 		}
+		clipper.End()
+
+		if w.scrollToBottom {
+			imgui.SetScrollHereYV(1)
+		}
+
+		if imgui.ScrollY() == imgui.ScrollMaxY() {
+			w.scrollToBottom = true
+		} else {
+			w.scrollToBottom = false
+		}
 
 		// TODO: Only stick to bottom if scrolled to bottom.
-		imgui.SetScrollYFloat(imgui.ScrollMaxY())
+		//imgui.SetScrollYFloat(imgui.ScrollMaxY())
 		imgui.EndTable()
 
 	}
@@ -102,6 +116,7 @@ func NewConsoleWindow() *ConsoleWindow {
 			imgui.TableFlagsScrollY |
 			imgui.TableFlagsNoPadOuterX |
 			imgui.TableFlagsRowBg | imgui.TableFlagsSizingFixedFit,
+		scrollToBottom: true,
 	}
 
 	w.Window.layoutBuilder = w

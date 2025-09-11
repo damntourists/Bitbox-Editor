@@ -319,6 +319,7 @@ func (t *Theme) Apply() func() {
 	//ColCOUNT            Col = 58
 
 	implot.PushStyleColorVec4(implot.ColLine, t.Style.Colors.PlotLines.Vec4)
+	implot.PushStyleColorVec4(implot.ColSelection, t.Style.Colors.PlotLines.Vec4)
 	implot.PushStyleVarFloat(implot.StyleVarFillAlpha, 0.8)
 
 	/*
@@ -381,7 +382,7 @@ func (t *Theme) Apply() func() {
 		imgui.PopStyleColorV(int32(imgui.ColCOUNT))
 
 		implot.PopStyleVarV(1)
-		implot.PopStyleColorV(1)
+		implot.PopStyleColorV(2)
 	}
 }
 

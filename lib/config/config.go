@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 const (
@@ -19,20 +20,25 @@ var defaultConfig = []byte(`
 # Default pre-generated config
 [global]
 loglevel = "DEBUG"
+theme = "future dark"
 `)
+
+var log *zap.Logger
 
 // Structure of config
 type Config struct {
 	Global struct {
 		Loglevel string
-		//Theme    string
+		Theme    string
 	}
 }
 
 func init() {
+	log = logging.NewLogger("config")
+
 	configdir, _ := os.UserConfigDir()
 	appConfigDir := filepath.Join(configdir, APP_NAME)
-	//
+
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix(APP_NAME)
 	viper.SetConfigName("config")
@@ -43,7 +49,7 @@ func init() {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 
 		if errors.As(err, &configFileNotFoundError) {
-			logging.Logger.Debug("Config file missing!")
+			log.Debug("Config file missing!")
 
 			err = viper.ReadConfig(bytes.NewBuffer(defaultConfig))
 			if err != nil {
@@ -54,7 +60,7 @@ func init() {
 			_, err := os.Open(fmt.Sprintf(appConfigDir))
 			if err != nil {
 				// Missing, create it.
-				logging.Logger.Debug(fmt.Sprintf("Creating directory: %s ...", appConfigDir))
+				log.Debug(fmt.Sprintf("Creating directory: %s ...", appConfigDir))
 				mkdirerr := os.Mkdir(appConfigDir, 0750)
 				if mkdirerr != nil {
 					panic(mkdirerr)
@@ -65,11 +71,15 @@ func init() {
 			if err != nil {
 				panic(err)
 			}
-			logging.Logger.Debug("Wrote default config successfully.")
+			log.Debug("Wrote default config successfully.")
 
 			if err := viper.ReadInConfig(); err != nil {
 				panic(err)
 			}
+		} else {
+			panic(err)
 		}
+	} else {
+		log.Debug("Config file found!")
 	}
 }

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"bitbox-editor/lib/io/drive/detect"
 	"bitbox-editor/lib/logging"
 	"bitbox-editor/lib/util"
 	"bitbox-editor/ui/fonts"
@@ -33,8 +32,13 @@ func init() {
 
 type BitboxEditor struct {
 	Window struct {
-		SettingsWindow *windows.SettingsWindow
-		ConsoleWindow  *windows.ConsoleWindow
+		Settings *windows.SettingsWindow
+		Console  *windows.ConsoleWindow
+
+		test *windows.WavPlotWindow
+
+		Storage *windows.StorageWindow
+		Presets *windows.PresetWindow
 	}
 
 	Modal struct {
@@ -113,7 +117,7 @@ func (b *BitboxEditor) setup() {
 
 	// Create the window
 	b.backend.SetBgColor(imgui.NewVec4(0.45, 0.55, 0.6, 1.0))
-	b.backend.CreateWindow("Bitbox Editor", 800, 600)
+	b.backend.CreateWindow("Bitbox Editor v0.0.0", 1200, 800)
 
 	b.backend.SetIcons(icons...)
 
@@ -134,8 +138,15 @@ func (b *BitboxEditor) setup() {
 }
 
 func (b *BitboxEditor) initWindows() {
-	b.Window.SettingsWindow = windows.NewSettingsWindow()
-	b.Window.ConsoleWindow = windows.NewConsoleWindow()
+	b.Window.Settings = windows.NewSettingsWindow()
+	b.Window.Console = windows.NewConsoleWindow()
+	b.Window.Storage = windows.NewStorageWindow()
+	b.Window.Presets = windows.NewPresetWindow()
+	b.Window.test = windows.NewWavPlotWindow()
+
+	// set initial states
+	b.Window.Settings.Close()
+	//b.Window.Console.Close()
 
 	//b.Window.Viewers = make([]*windows.ViewerWindow, 0)
 }
@@ -164,7 +175,7 @@ func (b *BitboxEditor) menu() {
 				false,
 				true) {
 
-				b.Window.SettingsWindow.Open()
+				b.Window.Settings.Open()
 			}
 
 			imgui.EndMenu()
@@ -175,10 +186,10 @@ func (b *BitboxEditor) menu() {
 			if imgui.MenuItemBoolV(
 				"NewConsoleWindow",
 				"ALT+6",
-				b.Window.ConsoleWindow.IsOpen(),
+				b.Window.Console.IsOpen(),
 				true) {
 
-				b.Window.ConsoleWindow.Open()
+				b.Window.Console.Open()
 			}
 
 			imgui.EndMenu()
@@ -236,6 +247,12 @@ func (b *BitboxEditor) dockspace() {
 	imgui.SetNextWindowPos(dockspacePos)
 	imgui.SetNextWindowSize(dockspaceSize)
 	imgui.SetNextWindowBgAlpha(0)
+	imgui.PushStyleVarVec2(imgui.StyleVarWindowPadding, imgui.Vec2{X: 0, Y: 0})
+
+	defer func() {
+		imgui.PopStyleVar()
+	}()
+
 	imgui.BeginV(
 		"dockspace-window",
 		nil,
@@ -265,6 +282,10 @@ func (b *BitboxEditor) loop() {
 
 	// Set theme and pop theme after loop
 	themeFin := b.theme.Apply()
+	//style := imgui.CurrentStyle()
+	//style.SetAntiAliasedFill(true)
+	//style.SetAntiAliasedLines(true)
+
 	defer themeFin()
 
 	// Main app framework
@@ -273,10 +294,13 @@ func (b *BitboxEditor) loop() {
 	b.dockspace()
 
 	// Layout windows
-	b.Window.ConsoleWindow.Build()
+	b.Window.Console.Build()
+	b.Window.Storage.Build()
+	b.Window.Presets.Build()
+	b.Window.test.Build()
 
-	if b.Window.SettingsWindow.IsOpen() {
-		b.Window.SettingsWindow.Build()
+	if b.Window.Settings.IsOpen() {
+		b.Window.Settings.Build()
 	}
 }
 
@@ -300,18 +324,6 @@ func NewBitboxEditor() *BitboxEditor {
 		initialized: false,
 	}
 	app.setup()
-
-	// Start drive detect goroutine
-	go func() {
-		if drives, err := detect.Detect(); err == nil {
-			log.Debug(fmt.Sprintf("%d USB Devices Found", len(drives)))
-			for _, d := range drives {
-				log.Debug(d)
-			}
-		} else {
-			//log.Debug(err.Error())
-		}
-	}()
 
 	fonts.RebuildFonts(app.backend)
 
