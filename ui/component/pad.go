@@ -10,7 +10,7 @@ import (
 type Pad struct {
 	*Component
 
-	size     float32 // width=height (square)
+	size     float32
 	padding  float32
 	rounding float32
 	border   float32
@@ -86,28 +86,21 @@ func (p *Pad) BorderColor(color imgui.Vec4) *Pad {
 	return p
 }
 
-// Layout renders the card and emits MouseEvents based on the InvisibleButton
-// (the button must be the last item to keep ImGui’s item context).
 func (p *Pad) Layout() {
 	size := imgui.Vec2{X: p.size, Y: p.size}
 	pos := imgui.CursorScreenPos()
 
-	// Hit target
 	imgui.InvisibleButton(fmt.Sprintf("##pad-%s", p.Component.IDStr()), size)
 
 	hovered := imgui.IsItemHovered()
 	active := imgui.IsItemActive()
 	clicked := imgui.IsItemClicked()
 
-	// Toggle selection (or handle externally via MouseEvents listener)
 	if clicked {
 		p.selected = !p.selected
 	}
-
-	// Emit mouse state for listeners
 	p.handleMouseEvents()
 
-	// Draw visuals
 	draw := imgui.WindowDrawList()
 	min := pos
 	max := imgui.Vec2{X: pos.X + size.X, Y: pos.Y + size.Y}
@@ -127,7 +120,6 @@ func (p *Pad) Layout() {
 		draw.AddRectV(min, max, imgui.ColorU32Vec4(p.borderColor), p.rounding, imgui.DrawFlagsNone, p.border)
 	}
 
-	// Text layout (3 lines max)
 	innerX := min.X + p.padding
 	innerY := min.Y + p.padding
 	innerW := size.X - 2*p.padding
@@ -149,7 +141,7 @@ func (p *Pad) Layout() {
 	draw.PopClipRect()
 }
 
-// addTextClipped renders a single-line text clipped to maxWidth with a basic ellipsis.
+// addTextClipped adds text with truncation.
 func addTextClipped(draw *imgui.DrawList, pos imgui.Vec2, maxWidth float32, text string, color imgui.Vec4) {
 	if text == "" {
 		return
