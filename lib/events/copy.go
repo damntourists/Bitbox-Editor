@@ -1,7 +1,5 @@
 package events
 
-import "github.com/maniartech/signals"
-
 type FileCopy int32
 
 const (
@@ -18,5 +16,3 @@ type FileCopyEventRecord struct {
 	Source      string
 	Destination string
 }
-
-var FileCopyEvent = signals.New[FileCopyEventRecord]()

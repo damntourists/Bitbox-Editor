@@ -1,8 +1,11 @@
 package component
 
 import (
-	events2 "bitbox-editor/ui/events"
+	"bitbox-editor/ui/component/state"
+	"bitbox-editor/ui/events"
+	"bitbox-editor/ui/types"
 	"context"
+	"strconv"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/maniartech/signals"
@@ -13,13 +16,7 @@ const (
 	Auto float32 = -1
 )
 
-var ComponentRegistry = make(map[ID]*Component)
-
-type ID string
-
-func (i ID) String() string {
-	return string(i)
-}
+var ComponentRegistry = make(map[imgui.ID]*Component)
 
 type ComponentType interface {
 	Layout()
@@ -27,30 +24,56 @@ type ComponentType interface {
 
 // Component - Base Backend component
 type Component struct {
-	id    ID
-	srcID ID
+	id imgui.ID
 
-	state         events2.State
-	previousState events2.State
+	state         state.ItemState
+	previousState state.ItemState
 
-	MouseEvents signals.Signal[events2.MouseEventRecord]
+	data interface{}
+
+	MouseEvents signals.Signal[events.MouseEventRecord]
+
+	layoutBuilder types.ComponentLayoutBuilder
 }
 
-func (c *Component) Layout() {
-	panic("implement me")
-}
-func (c *Component) SourceID(src ID) *Component {
-	c.srcID = src
+func (c *Component) SetData(data interface{}) *Component {
+	c.data = data
 	return c
 }
-func (c *Component) ID() ID {
+
+func (c *Component) SetLayoutBuilder(layoutBuilder types.ComponentLayoutBuilder) *Component {
+	c.layoutBuilder = layoutBuilder
+	return c
+}
+
+func (c *Component) Data() interface{} {
+	return c.data
+}
+
+//func (c *Component) Build() {
+//	if c.layoutBuilder != nil {
+//		c.layoutBuilder.Layout()
+//	} else {
+//		c.Layout()
+//	}
+//}
+
+func (c *Component) ID() imgui.ID {
 	return c.id
 }
 
-func (c *Component) HandleMouseEvents() {
+func (c *Component) IDStr() string {
+	return strconv.Itoa(int(c.id))
+}
+
+func (c *Component) Layout() {
+	panic("not implemented")
+}
+
+func (c *Component) handleMouseEvents() {
 	var (
-		click  events2.ClickType
-		button events2.MouseButton
+		click  events.ClickType
+		button events.MouseButton
 
 		clickSet  bool
 		buttonSet bool
@@ -60,57 +83,58 @@ func (c *Component) HandleMouseEvents() {
 	c.previousState = c.state
 
 	// clear current state
-	c.state = events2.StateNone
+	c.state = state.ItemStateNone
 
 	// Check if the item is hovered, active, or focused and set state accordingly
 	if imgui.IsItemHovered() {
-		c.state |= events2.StateHovered
-		if !c.previousState.HasState(events2.StateHovered) {
-			c.state |= events2.StateHoverIn
+		c.state |= state.ItemStateHovered
+		if !c.previousState.HasState(state.ItemStateHovered) {
+			c.state |= state.ItemStateHoverIn
 		}
 	} else {
-		if c.previousState.HasState(events2.StateHovered) {
-			c.state |= events2.StateHoverOut
+		if c.previousState.HasState(state.ItemStateHovered) {
+			c.state |= state.ItemStateHoverOut
 		}
 	}
 
 	if imgui.IsItemActive() {
-		c.state |= events2.StateActive
-		if !c.previousState.HasState(events2.StateActive) {
-			c.state |= events2.StateActiveIn
+		c.state |= state.ItemStateActive
+		if !c.previousState.HasState(state.ItemStateActive) {
+			c.state |= state.ItemStateActiveIn
 		}
 	} else {
-		if c.previousState.HasState(events2.StateActive) {
-			c.state |= events2.StateActiveOut
+		if c.previousState.HasState(state.ItemStateActive) {
+			c.state |= state.ItemStateActiveOut
 		}
 	}
 
 	if imgui.IsItemFocused() {
-		c.state |= events2.StateFocused
-		if !c.previousState.HasState(events2.StateFocused) {
-			c.state |= events2.StateFocusIn
+		c.state |= state.ItemStateFocused
+		if !c.previousState.HasState(state.ItemStateFocused) {
+			c.state |= state.ItemStateFocusIn
 		}
 	} else {
-		if c.previousState.HasState(events2.StateFocused) {
-			c.state |= events2.StateFocusOut
+		if c.previousState.HasState(state.ItemStateFocused) {
+			c.state |= state.ItemStateFocusOut
 		}
 	}
 
-	buttonTypes := map[imgui.MouseButton]events2.MouseButton{
-		imgui.MouseButtonLeft:   events2.MouseButtonLeft,
-		imgui.MouseButtonRight:  events2.MouseButtonRight,
-		imgui.MouseButtonMiddle: events2.MouseButtonMiddle,
+	// Iterate through mouse buttons and update button/click
+	buttonTypes := []imgui.MouseButton{
+		imgui.MouseButtonLeft,
+		imgui.MouseButtonRight,
+		imgui.MouseButtonMiddle,
 	}
-	for bt, ebt := range buttonTypes {
+	for _, bt := range buttonTypes {
 		if imgui.IsItemClickedV(bt) {
-			button = ebt
-			buttonSet = true
+			button = events.MouseButton(bt)
+			buttonSet = true // Mark button as set
 
-			click = events2.Clicked
-			clickSet = true
+			click = events.Clicked
+			clickSet = true // Mark click as set
 
 			if imgui.IsMouseDoubleClicked(bt) {
-				click = events2.DoubleClicked
+				click = events.DoubleClicked
 				clickSet = true
 			}
 		}
@@ -119,12 +143,12 @@ func (c *Component) HandleMouseEvents() {
 	// Check if any of state, click, or button were set
 	if c.previousState != c.state || buttonSet || clickSet {
 		// Create a new event record
-		event := events2.MouseEventRecord{
-			ID:     c.id.String(),
+		event := events.MouseEventRecord{
+			ID:     c.ID(),
 			Type:   click,
 			State:  c.state,
 			Button: button,
-			GUID:   "src id here",
+			Data:   c.Data,
 		}
 
 		// Emit the event because it's different
@@ -132,13 +156,14 @@ func (c *Component) HandleMouseEvents() {
 	}
 }
 
-func NewComponent(id ID) *Component {
+func NewComponent(id imgui.ID) *Component {
 	if _, ok := ComponentRegistry[id]; !ok {
 		ComponentRegistry[id] = &Component{
 			id:            id,
-			state:         events2.StateNone,
-			previousState: events2.StateNone,
-			MouseEvents:   signals.New[events2.MouseEventRecord](), //events.ComponentMouseEvent,
+			state:         state.ItemStateNone,
+			previousState: state.ItemStateNone,
+			data:          nil,
+			MouseEvents:   signals.New[events.MouseEventRecord](),
 		}
 	}
 

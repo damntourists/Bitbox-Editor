@@ -6,19 +6,24 @@ import (
 
 type TextComponent struct {
 	*Component
-	text    string
-	font    *imgui.Font
-	wrapped bool
+	text       string
+	font       *imgui.Font
+	wrapped    bool
+	selectable bool
+	selected   bool
 }
 
 func Text(text string) *TextComponent {
-	cmp := NewComponent(ID(text))
-
-	return &TextComponent{
-		Component: cmp,
-		text:      text,
-		wrapped:   false,
+	cmp := &TextComponent{
+		Component:  NewComponent(imgui.IDStr(text)),
+		text:       text,
+		wrapped:    false,
+		selectable: false,
+		selected:   false,
 	}
+
+	//cmp.Component.layoutBuilder = cmp
+	return cmp
 }
 
 func (tc *TextComponent) Wrapped(wrap bool) *TextComponent {
@@ -29,6 +34,20 @@ func (tc *TextComponent) Wrapped(wrap bool) *TextComponent {
 func (tc *TextComponent) Font(font *imgui.Font) *TextComponent {
 	tc.font = font
 	return tc
+}
+
+func (tc *TextComponent) SetSelected(selected bool) *TextComponent {
+	tc.selected = selected
+	return tc
+}
+
+func (tc *TextComponent) Selectable(selectable bool) *TextComponent {
+	tc.selectable = selectable
+	return tc
+}
+
+func (tc *TextComponent) Selected() bool {
+	return tc.selected
 }
 
 func (tc *TextComponent) Layout() {
@@ -42,5 +61,15 @@ func (tc *TextComponent) Layout() {
 		defer imgui.PopFont()
 	}
 
-	imgui.TextUnformatted(tc.text)
+	if tc.selectable {
+		flags := imgui.SelectableFlagsSpanAllColumns
+		if tc.selected {
+			flags |= imgui.SelectableFlagsHighlight |
+				imgui.SelectableFlagsAllowDoubleClick
+		}
+		imgui.SelectableBoolV(tc.text, tc.selected, flags, imgui.Vec2{})
+		tc.handleMouseEvents()
+	} else {
+		imgui.TextUnformatted(tc.text)
+	}
 }

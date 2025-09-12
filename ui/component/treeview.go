@@ -8,20 +8,20 @@ import (
 
 type TreeRowComponent struct {
 	*Component
-	label    ID
+	//label    ID
 	flags    imgui.TreeNodeFlags
 	layout   Layout
 	children []*TreeRowComponent
 }
 
 func TreeRow(label string, components ...ComponentType) *TreeRowComponent {
-	cmp := NewComponent(ID(fmt.Sprintf("tree-row::%s", label)))
-
-	return &TreeRowComponent{
-		Component: cmp,
-		label:     ID(label),
-		layout:    components,
+	cmp := &TreeRowComponent{
+		Component: NewComponent(imgui.IDStr(fmt.Sprintf("tree-row::%s", label))),
+		//label:     ID(label),
+		layout: components,
 	}
+	cmp.Component.layoutBuilder = cmp
+	return cmp
 }
 
 func (trc *TreeRowComponent) Children(rows ...*TreeRowComponent) *TreeRowComponent {
@@ -40,11 +40,11 @@ func (trc *TreeRowComponent) Layout() {
 
 	open := false
 	if len(trc.children) > 0 {
-		open = imgui.TreeNodeExStrV(trc.label.String(), trc.flags)
+		open = imgui.TreeNodeExStrV(trc.Component.IDStr(), trc.flags)
 	} else {
 		trc.flags |= imgui.TreeNodeFlagsLeaf | imgui.TreeNodeFlagsNoTreePushOnOpen
-		if imgui.TreeNodeExStrV(trc.label.String(), trc.flags) {
-			trc.HandleMouseEvents()
+		if imgui.TreeNodeExStrV(trc.Component.IDStr(), trc.flags) {
+			//trc.HandleMouseEvents()
 		}
 	}
 
@@ -79,10 +79,8 @@ type TreeComponent struct {
 }
 
 func Tree(id string) *TreeComponent {
-	cmp := NewComponent(ID(id))
-
-	return &TreeComponent{
-		Component: cmp,
+	cmp := &TreeComponent{
+		Component: NewComponent(imgui.IDStr(id)),
 		flags: imgui.TableFlagsBordersV |
 			imgui.TableFlagsBordersOuterH |
 			imgui.TableFlagsResizable |
@@ -90,6 +88,8 @@ func Tree(id string) *TreeComponent {
 		rows:    nil,
 		columns: nil,
 	}
+	cmp.Component.layoutBuilder = cmp
+	return cmp
 }
 
 // Freeze columns/rows so they stay visible when scrolled.
@@ -136,7 +136,7 @@ func (tt *TreeComponent) Layout() {
 	}
 
 	if imgui.BeginTableV(
-		tt.id.String(),
+		tt.Component.IDStr(),
 		int32(colCount),
 		tt.flags,
 		tt.size,

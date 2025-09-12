@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"bitbox-editor/lib/events"
 	"bitbox-editor/lib/logging"
 	"bitbox-editor/lib/util"
 	"bitbox-editor/ui/fonts"
 	"bitbox-editor/ui/theme"
 	"bitbox-editor/ui/windows"
+	"context"
 	"image"
 	"runtime"
 	"sync"
@@ -37,8 +39,9 @@ type BitboxEditor struct {
 
 		test *windows.WavPlotWindow
 
-		Storage *windows.StorageWindow
-		Presets *windows.PresetWindow
+		Storage   *windows.StorageWindow
+		Presets   *windows.PresetWindow
+		PadWindow *windows.PadWindow
 	}
 
 	Modal struct {
@@ -142,13 +145,29 @@ func (b *BitboxEditor) initWindows() {
 	b.Window.Console = windows.NewConsoleWindow()
 	b.Window.Storage = windows.NewStorageWindow()
 	b.Window.Presets = windows.NewPresetWindow()
+
+	b.Window.PadWindow = windows.NewPadWindow()
+
 	b.Window.test = windows.NewWavPlotWindow()
 
 	// set initial states
 	b.Window.Settings.Close()
-	//b.Window.Console.Close()
 
 	//b.Window.Viewers = make([]*windows.ViewerWindow, 0)
+	b.Window.Storage.Events.AddListener(
+		func(ctx context.Context, record events.StorageEventRecord) {
+			if record.Type == events.StorageActivatedEvent {
+				//log.Info(record.Path)
+				b.Window.Presets.SetPresetLocation(record.Data.(*windows.StorageLocation))
+			}
+		},
+	)
+
+	b.Window.Presets.Events.AddListener(
+		func(ctx context.Context, record events.PresetEventRecord) {
+			println(record.Data)
+		})
+
 }
 
 func (b *BitboxEditor) menu() {
@@ -240,10 +259,14 @@ func (b *BitboxEditor) dockspace() {
 	dockSpaceFlags := imgui.DockNodeFlagsPassthruCentralNode
 
 	dockSpace := imgui.IDStr("dockspace")
-
-	dockspacePos := imgui.Vec2{X: viewportPos.X, Y: viewportPos.Y + imgui.FrameHeight() + toolbarHeight}
-	dockspaceSize := imgui.Vec2{X: viewportSize.X, Y: viewportSize.Y - imgui.FrameHeight() - toolbarHeight}
-
+	dockspacePos := imgui.Vec2{
+		X: viewportPos.X,
+		Y: viewportPos.Y + imgui.FrameHeight() + toolbarHeight,
+	}
+	dockspaceSize := imgui.Vec2{
+		X: viewportSize.X,
+		Y: viewportSize.Y - imgui.FrameHeight() - toolbarHeight,
+	}
 	imgui.SetNextWindowPos(dockspacePos)
 	imgui.SetNextWindowSize(dockspaceSize)
 	imgui.SetNextWindowBgAlpha(0)
@@ -282,9 +305,6 @@ func (b *BitboxEditor) loop() {
 
 	// Set theme and pop theme after loop
 	themeFin := b.theme.Apply()
-	//style := imgui.CurrentStyle()
-	//style.SetAntiAliasedFill(true)
-	//style.SetAntiAliasedLines(true)
 
 	defer themeFin()
 
@@ -297,6 +317,8 @@ func (b *BitboxEditor) loop() {
 	b.Window.Console.Build()
 	b.Window.Storage.Build()
 	b.Window.Presets.Build()
+	b.Window.PadWindow.Build()
+
 	b.Window.test.Build()
 
 	if b.Window.Settings.IsOpen() {

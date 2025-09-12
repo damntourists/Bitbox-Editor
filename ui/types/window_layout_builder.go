@@ -1,6 +1,6 @@
 package types
 
-type LayoutBuilder interface {
+type WindowLayoutBuilder interface {
 	Menu()
 	Layout()
 	Style() func()

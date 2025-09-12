@@ -26,7 +26,9 @@ type (
 
 		config *WindowConfig
 
-		layoutBuilder types.LayoutBuilder
+		layoutBuilder types.WindowLayoutBuilder
+
+		loading bool
 	}
 )
 

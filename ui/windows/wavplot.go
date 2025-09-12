@@ -18,7 +18,7 @@ func (w *WavPlotWindow) Layout() {
 
 func NewWavPlotWindow() *WavPlotWindow {
 	sw := &WavPlotWindow{
-		Window: NewWindow("Wave Test", "AudioWaveform", NewWindowConfig()),
+		Window: NewWindow("Wave", "AudioWaveform", NewWindowConfig()),
 		waveform: component.NewWaveformComponent(
 			"waveform",
 		),

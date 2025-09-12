@@ -17,8 +17,6 @@ import (
 type WaveComponent struct {
 	*Component
 
-	label string
-
 	wav *audio.WaveFile
 
 	cursor *WaveMarker
@@ -199,7 +197,7 @@ func (wc *WaveComponent) Layout() {
 	}
 
 	// Create actual plot once wav is fully loaded
-	if implot.BeginPlotV(wc.label, imgui.Vec2{X: -1, Y: -1}, wc.plotFlags) {
+	if implot.BeginPlotV(wc.Component.IDStr(), imgui.Vec2{X: -1, Y: -1}, wc.plotFlags) {
 		implot.SetupAxesV("Time", "Amplitude", wc.axisXFlags, wc.axisYFlags)
 		implot.SetupAxisLimitsV(implot.AxisX1, wc.xLimitMin, wc.xLimitMax, implot.CondOnce)
 		implot.SetupAxisLimitsV(implot.AxisY1, wc.yLimitMin, wc.yLimitMax, implot.CondOnce)
@@ -312,8 +310,7 @@ func (wc *WaveComponent) Layout() {
 
 func NewWaveformComponent(label string) *WaveComponent {
 	cmp := &WaveComponent{
-		Component: NewComponent(ID(label)),
-		label:     label,
+		Component: NewComponent(imgui.IDStr(label)),
 		cursor:    &WaveMarker{start: 0.0},
 
 		plotFlags: implot.FlagsNoMenus |
@@ -333,6 +330,8 @@ func NewWaveformComponent(label string) *WaveComponent {
 			implot.AxisFlagsNoSideSwitch |
 			implot.AxisFlagsAutoFit,
 	}
+
+	cmp.Component.layoutBuilder = cmp
 
 	defer cmp.LoadWav("/home/brett/Downloads/micro_bundle-v3/Soundopolis/Sci Fi/Texture_Alien_Bugs_002.wav") //filepath)
 

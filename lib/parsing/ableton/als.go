@@ -1,6 +1,13 @@
 package ableton
 
-import "encoding/xml"
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/xml"
+	"fmt"
+	"io"
+	"os"
+)
 
 // Ableton Live project
 type Ableton struct {
@@ -197,4 +204,147 @@ type AttrFloat64 struct {
 
 type AttrBool struct {
 	Value bool `xml:"Value,attr"`
+}
+
+func Unmarshal(data []byte) (*Ableton, error) {
+	// gzip magic 0x1f 0x8b
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		gr, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader: %w", err)
+		}
+		defer gr.Close()
+		return UnmarshalReader(gr)
+	}
+	return UnmarshalReader(bytes.NewReader(data))
+}
+
+// UnmarshalReader parses an Ableton XML document.
+func UnmarshalReader(r io.Reader) (*Ableton, error) {
+	var doc Ableton
+	dec := xml.NewDecoder(r)
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("xml decode: %w", err)
+	}
+	return &doc, nil
+}
+
+// Marshal serializes the Ableton document to XML bytes.
+func Marshal(doc *Ableton) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := marshalToWriter(&buf, doc, false, false); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// MarshalIndent serializes the Ableton document.
+func MarshalIndent(doc *Ableton, indent bool) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := marshalToWriter(&buf, doc, indent, false); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// MarshalGZIP serializes the Ableton document to gzipped XML bytes.
+func MarshalGZIP(doc *Ableton, indent bool) ([]byte, error) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if err := marshalToWriter(gw, doc, indent, true); err != nil {
+		_ = gw.Close()
+		return nil, err
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("gzip close: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func UnmarshalFile(path string) (*Ableton, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	// Check if gzip magic 0x1f 0x8b
+	var hdr [2]byte
+	n, _ := f.Read(hdr[:])
+	if n == 2 && hdr[0] == 0x1f && hdr[1] == 0x8b {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		gr, err := gzip.NewReader(f)
+		if err != nil {
+			return nil, fmt.Errorf("gzip reader: %w", err)
+		}
+		defer gr.Close()
+		return UnmarshalReader(gr)
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return UnmarshalReader(f)
+}
+
+func MarshalFile(path string, doc *Ableton, indent, gzipOut bool) error {
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create: %w", err)
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	var w io.Writer = f
+	var gw *gzip.Writer
+	if gzipOut {
+		gw = gzip.NewWriter(f)
+		w = gw
+	}
+
+	if err := marshalToWriter(w, doc, indent, gzipOut); err != nil {
+		if gw != nil {
+			_ = gw.Close()
+		}
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	if gw != nil {
+		if err := gw.Close(); err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return fmt.Errorf("gzip close: %w", err)
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close: %w", err)
+	}
+
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+func marshalToWriter(w io.Writer, doc *Ableton, indent, includeXMLDecl bool) error {
+	enc := xml.NewEncoder(w)
+	if indent {
+		enc.Indent("", "  ")
+	}
+	if err := enc.Encode(doc); err != nil {
+		return fmt.Errorf("xml encode: %w", err)
+	}
+	if err := enc.Flush(); err != nil {
+		return fmt.Errorf("xml flush: %w", err)
+	}
+	return nil
 }

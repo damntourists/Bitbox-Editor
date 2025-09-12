@@ -22,7 +22,7 @@ type (
 		config       *ModalConfig
 		WindowEvents signals.Signal[events.WindowEventRecord]
 
-		layoutBuilder types.LayoutBuilder
+		layoutBuilder types.WindowLayoutBuilder
 	}
 )
 
