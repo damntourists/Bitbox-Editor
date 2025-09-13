@@ -2,8 +2,8 @@ package windows
 
 import (
 	"bitbox-editor/lib/audio"
+	"bitbox-editor/lib/preset"
 	"bitbox-editor/ui/component"
-	"fmt"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 )
@@ -20,29 +20,20 @@ type Pad struct {
 type PadWindow struct {
 	*Window
 
-	rows, cols int
+	padGrid *component.PadGridComponent
 
-	pads [][]*Pad
-
+	preset  *preset.Preset
 	loading bool
 }
 
 func (w *PadWindow) Menu() {}
 func (w *PadWindow) Layout() {
-	for i := 0; i < w.rows; i++ {
-		for j := 0; j < w.cols; j++ {
-			p := component.NewPad(
-				imgui.IDStr(fmt.Sprintf("pad-%dx%d", i, j)),
-				"row1",
-				"row2",
-				"row3",
-			)
-			p.Layout()
-			imgui.SameLine()
-		}
-		imgui.NewLine()
-	}
+	w.padGrid.Layout()
+}
 
+func (w *PadWindow) SetPreset(preset *preset.Preset) {
+	w.preset = preset
+	w.padGrid.SetPreset(preset)
 }
 
 func NewPadWindow() *PadWindow {
@@ -51,11 +42,14 @@ func NewPadWindow() *PadWindow {
 
 	w := &PadWindow{
 		Window: NewWindow("Pads", "Grid3x2", cfg),
-		rows:   2,
-		cols:   4,
+		padGrid: component.NewPadGrid(
+			imgui.IDStr("pad-grid"),
+			2,
+			4,
+			82,
+		),
 	}
-	w.loading = true
-	w.Window.loading = true
+
 	w.Window.layoutBuilder = w
 	return w
 }

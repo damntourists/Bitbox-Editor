@@ -3,6 +3,7 @@ package ui
 import (
 	"bitbox-editor/lib/events"
 	"bitbox-editor/lib/logging"
+	"bitbox-editor/lib/preset"
 	"bitbox-editor/lib/util"
 	"bitbox-editor/ui/fonts"
 	"bitbox-editor/ui/theme"
@@ -165,7 +166,11 @@ func (b *BitboxEditor) initWindows() {
 
 	b.Window.Presets.Events.AddListener(
 		func(ctx context.Context, record events.PresetEventRecord) {
-			println(record.Data)
+			switch record.Type {
+			case events.LoadPreset:
+				p := record.Data.(*preset.Preset)
+				b.Window.PadWindow.SetPreset(p)
+			}
 		})
 
 }

@@ -1,6 +1,7 @@
 package component
 
 import (
+	"bitbox-editor/lib/logging"
 	"bitbox-editor/ui/component/state"
 	"bitbox-editor/ui/events"
 	"bitbox-editor/ui/types"
@@ -9,14 +10,20 @@ import (
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/maniartech/signals"
+	"go.uber.org/zap"
 )
 
 const (
-	// Auto is used to widget.Size to indicate height or width to occupy available spaces.
+	// Auto is used to widget.SetSize to indicate height or width to occupy available spaces.
 	Auto float32 = -1
 )
 
+var log *zap.Logger
 var ComponentRegistry = make(map[imgui.ID]*Component)
+
+func init() {
+	log = logging.NewLogger("cmp")
+}
 
 type ComponentType interface {
 	Layout()

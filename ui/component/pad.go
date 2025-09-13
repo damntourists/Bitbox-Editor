@@ -1,14 +1,17 @@
 package component
 
 import (
+	"bitbox-editor/lib/audio"
 	"bitbox-editor/ui/theme"
 	"fmt"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 )
 
-type Pad struct {
+type PadComponent struct {
 	*Component
+
+	row, col int
 
 	size     float32
 	padding  float32
@@ -27,66 +30,110 @@ type Pad struct {
 	bgSelected  imgui.Vec4
 	textColor   imgui.Vec4
 	borderColor imgui.Vec4
+
+	playProgress       float32
+	playProgressHeight float32
+	playProgressBg     imgui.Vec4
+	playProgressFg     imgui.Vec4
+
+	wave *audio.WaveFile
+
+	loading bool
 }
 
-func (p *Pad) Size(px float32) *Pad {
+func (p *PadComponent) SetProgress(v float32) *PadComponent {
+	if v < 0 {
+		v = 0
+	} else if v > 1 {
+		v = 1
+	}
+	p.playProgress = v
+	return p
+}
+
+func (p *PadComponent) SetProgressHeight(height float32) *PadComponent {
+	p.playProgressHeight = height
+	return p
+}
+
+func (p *PadComponent) SetWave(wave *audio.WaveFile) *PadComponent {
+	p.wave = wave
+	return p
+}
+
+func (p *PadComponent) SetLoading(loading bool) *PadComponent {
+	p.loading = loading
+	return p
+}
+
+func (p *PadComponent) Progress() float32 {
+	return p.playProgress
+}
+
+func (p *PadComponent) SetProgressBg(bg imgui.Vec4) *PadComponent {
+	p.playProgressBg = bg
+	return p
+}
+
+func (p *PadComponent) SetProgressFg(fg imgui.Vec4) *PadComponent {
+	p.playProgressFg = fg
+	return p
+}
+
+func (p *PadComponent) SetSize(px float32) *PadComponent {
 	p.size = px
 	return p
 }
 
-func (p *Pad) Padding(px float32) *Pad {
+func (p *PadComponent) SetPadding(px float32) *PadComponent {
 	p.padding = px
 	return p
 }
 
-func (p *Pad) Rounding(px float32) *Pad {
+func (p *PadComponent) SetRounding(px float32) *PadComponent {
 	p.rounding = px
 	return p
 }
 
-func (p *Pad) Border(px float32) *Pad {
+func (p *PadComponent) SetBorder(px float32) *PadComponent {
 	p.border = px
 	return p
 }
 
-func (p *Pad) Lines(l1, l2, l3 string) *Pad {
+func (p *PadComponent) SetLines(l1, l2, l3 string) *PadComponent {
 	p.line1, p.line2, p.line3 = l1, l2, l3
 	return p
 }
 
-func (p *Pad) SetSelected(sel bool) *Pad {
+func (p *PadComponent) SetSelected(sel bool) *PadComponent {
 	p.selected = sel
 	return p
 }
 
-func (p *Pad) Selected() bool { return p.selected }
+func (p *PadComponent) Selected() bool { return p.selected }
 
-func (p *Pad) Bg(color imgui.Vec4) *Pad {
-	p.bg = color
-	return p
-}
-func (p *Pad) BgHovered(color imgui.Vec4) *Pad {
+func (p *PadComponent) SetBgHovered(color imgui.Vec4) *PadComponent {
 	p.bgHovered = color
 	return p
 }
-func (p *Pad) BgActive(color imgui.Vec4) *Pad {
+func (p *PadComponent) SetBgActive(color imgui.Vec4) *PadComponent {
 	p.bgActive = color
 	return p
 }
-func (p *Pad) BgSelected(color imgui.Vec4) *Pad {
+func (p *PadComponent) SetBgSelected(color imgui.Vec4) *PadComponent {
 	p.bgSelected = color
 	return p
 }
-func (p *Pad) TextColor(color imgui.Vec4) *Pad {
+func (p *PadComponent) SetTextColor(color imgui.Vec4) *PadComponent {
 	p.textColor = color
 	return p
 }
-func (p *Pad) BorderColor(color imgui.Vec4) *Pad {
+func (p *PadComponent) SetBorderColor(color imgui.Vec4) *PadComponent {
 	p.borderColor = color
 	return p
 }
 
-func (p *Pad) Layout() {
+func (p *PadComponent) Layout() {
 	size := imgui.Vec2{X: p.size, Y: p.size}
 	pos := imgui.CursorScreenPos()
 
@@ -139,6 +186,29 @@ func (p *Pad) Layout() {
 		addTextClipped(draw, imgui.Vec2{X: innerX, Y: innerY}, innerW, p.line3, p.textColor)
 	}
 	draw.PopClipRect()
+	if p.playProgressHeight > 0 && p.playProgress > 0 {
+		barTop := max.Y - p.padding - p.playProgressHeight
+		barBottom := max.Y - p.padding
+		// Track (background)
+		if p.playProgressBg.W > 0 {
+			draw.AddRectFilledV(
+				imgui.Vec2{X: innerX, Y: barTop},
+				imgui.Vec2{X: innerX + innerW, Y: barBottom},
+				imgui.ColorU32Vec4(p.playProgressBg), 0, imgui.DrawFlagsNone,
+			)
+		}
+		// Filled portion
+		fillW := innerW * p.playProgress
+		if fillW < 1 {
+			fillW = 1 // ensure at least 1px when >0
+		}
+		draw.AddRectFilledV(
+			imgui.Vec2{X: innerX, Y: barTop},
+			imgui.Vec2{X: innerX + fillW, Y: barBottom},
+			imgui.ColorU32Vec4(p.playProgressFg), 0, imgui.DrawFlagsNone,
+		)
+	}
+
 }
 
 // addTextClipped adds text with truncation.
@@ -173,30 +243,38 @@ func addTextClipped(draw *imgui.DrawList, pos imgui.Vec2, maxWidth float32, text
 	draw.AddTextVec2(pos, imgui.ColorU32Vec4(color), text[:right-1]+ellipsis)
 }
 
-func NewPad(id imgui.ID, l1, l2, l3 string) *Pad {
-	cmp := &Pad{
+func NewPadComponent(id imgui.ID, row, col int, l1, l2, l3 string) *PadComponent {
+	t := theme.GetCurrentTheme()
+
+	cmp := &PadComponent{
 		Component: NewComponent(id),
 
+		row: row,
+		col: col,
+
 		size:     72,
-		padding:  8,
-		rounding: 4,
+		padding:  4,
+		rounding: 0,
 		border:   1,
 
 		line1: l1,
 		line2: l2,
 		line3: l3,
 
+		playProgress:       0.4,
+		playProgressHeight: 4,
+		playProgressBg:     t.Style.Colors.ScrollbarBg.Vec4,
+		playProgressFg:     t.Style.Colors.HeaderActive.Vec4,
+
+		bg:          t.Style.Colors.FrameBg.Vec4,
+		bgHovered:   t.Style.Colors.HeaderHovered.Vec4,
+		bgActive:    t.Style.Colors.HeaderActive.Vec4,
+		bgSelected:  t.Style.Colors.Header.Vec4,
+		textColor:   t.Style.Colors.Text.Vec4,
+		borderColor: t.Style.Colors.Border.Vec4,
+
 		selected: false,
 	}
-
-	t := theme.GetCurrentTheme()
-
-	cmp.bg = t.Style.Colors.FrameBg.Vec4
-	cmp.bgHovered = t.Style.Colors.HeaderHovered.Vec4
-	cmp.bgActive = t.Style.Colors.HeaderActive.Vec4
-	cmp.bgSelected = t.Style.Colors.Header.Vec4
-	cmp.textColor = t.Style.Colors.Text.Vec4
-	cmp.borderColor = t.Style.Colors.Border.Vec4
 
 	cmp.Component.layoutBuilder = cmp
 	return cmp
