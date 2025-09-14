@@ -41,6 +41,9 @@ type PadComponent struct {
 	loading bool
 }
 
+func (p *PadComponent) Row() int { return p.row }
+func (p *PadComponent) Col() int { return p.col }
+
 func (p *PadComponent) SetProgress(v float32) *PadComponent {
 	if v < 0 {
 		v = 0
@@ -160,7 +163,10 @@ func (p *PadComponent) Layout() {
 		bg = p.bgHovered
 	}
 	if p.selected {
+		p.line3 = "selected"
 		bg = p.bgSelected
+	} else {
+		p.line3 = ""
 	}
 	draw.AddRectFilledV(min, max, imgui.ColorU32Vec4(bg), p.rounding, imgui.DrawFlagsNone)
 	if p.border > 0 {
@@ -269,7 +275,7 @@ func NewPadComponent(id imgui.ID, row, col int, l1, l2, l3 string) *PadComponent
 		bg:          t.Style.Colors.FrameBg.Vec4,
 		bgHovered:   t.Style.Colors.HeaderHovered.Vec4,
 		bgActive:    t.Style.Colors.HeaderActive.Vec4,
-		bgSelected:  t.Style.Colors.Header.Vec4,
+		bgSelected:  t.Style.Colors.HeaderActive.Vec4,
 		textColor:   t.Style.Colors.Text.Vec4,
 		borderColor: t.Style.Colors.Border.Vec4,
 

@@ -29,6 +29,14 @@ type Preset struct {
 	loading bool
 }
 
+func (p *Preset) BitboxConfig() *bitbox.Document {
+	return p.bitboxConfig
+}
+
+func (p *Preset) AbletonConfig() *ableton.Ableton {
+	return p.abletonConfig
+}
+
 func (p *Preset) loadAbletonConfig(path string) {
 	f, err := os.Open(path)
 	if err != nil {

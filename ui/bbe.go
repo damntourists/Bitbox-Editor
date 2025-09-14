@@ -5,6 +5,8 @@ import (
 	"bitbox-editor/lib/logging"
 	"bitbox-editor/lib/preset"
 	"bitbox-editor/lib/util"
+	"bitbox-editor/ui/component"
+	uiEvents "bitbox-editor/ui/events"
 	"bitbox-editor/ui/fonts"
 	"bitbox-editor/ui/theme"
 	"bitbox-editor/ui/windows"
@@ -42,7 +44,8 @@ type BitboxEditor struct {
 
 		Storage   *windows.StorageWindow
 		Presets   *windows.PresetWindow
-		PadWindow *windows.PadWindow
+		PadGrid   *windows.PadGridWindow
+		PadConfig *windows.PadConfigWindow
 	}
 
 	Modal struct {
@@ -147,8 +150,8 @@ func (b *BitboxEditor) initWindows() {
 	b.Window.Storage = windows.NewStorageWindow()
 	b.Window.Presets = windows.NewPresetWindow()
 
-	b.Window.PadWindow = windows.NewPadWindow()
-
+	b.Window.PadGrid = windows.NewPadWindow()
+	b.Window.PadConfig = windows.NewPadConfigWindow()
 	b.Window.test = windows.NewWavPlotWindow()
 
 	// set initial states
@@ -169,9 +172,19 @@ func (b *BitboxEditor) initWindows() {
 			switch record.Type {
 			case events.LoadPreset:
 				p := record.Data.(*preset.Preset)
-				b.Window.PadWindow.SetPreset(p)
+				b.Window.PadGrid.SetPreset(p)
+				b.Window.PadConfig.SetPreset(p)
 			}
 		})
+
+	b.Window.PadGrid.Events.AddListener(func(ctx context.Context, record uiEvents.PadEventRecord) {
+		switch record.Type {
+		case uiEvents.PadActivated:
+			b.Window.PadConfig.SetPad(record.Data.(*component.PadComponent))
+			//b.Window.PadConfigWindow.Open()
+		}
+	},
+		"pad-events")
 
 }
 
@@ -322,7 +335,8 @@ func (b *BitboxEditor) loop() {
 	b.Window.Console.Build()
 	b.Window.Storage.Build()
 	b.Window.Presets.Build()
-	b.Window.PadWindow.Build()
+	b.Window.PadGrid.Build()
+	b.Window.PadConfig.Build()
 
 	b.Window.test.Build()
 
