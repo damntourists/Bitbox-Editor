@@ -60,6 +60,6 @@ func TableRow(id imgui.ID, components ...ComponentType) *TableRowComponent {
 		layout:       components,
 		bgColor:      nil,
 	}
-	//trc.Component.layoutBuilder = trc
+	trc.Component.layoutBuilder = trc
 	return trc
 }

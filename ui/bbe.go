@@ -5,7 +5,6 @@ import (
 	"bitbox-editor/lib/logging"
 	"bitbox-editor/lib/preset"
 	"bitbox-editor/lib/util"
-	"bitbox-editor/ui/component"
 	uiEvents "bitbox-editor/ui/events"
 	"bitbox-editor/ui/fonts"
 	"bitbox-editor/ui/theme"
@@ -36,16 +35,17 @@ func init() {
 }
 
 type BitboxEditor struct {
+	dockspaceID imgui.ID
+
 	Window struct {
 		Settings *windows.SettingsWindow
 		Console  *windows.ConsoleWindow
 
-		test *windows.WavPlotWindow
+		Storage *windows.StorageWindow
+		Presets *windows.PresetListWindow
+		Library *windows.LibraryWindow
 
-		Storage   *windows.StorageWindow
-		Presets   *windows.PresetWindow
-		PadGrid   *windows.PadGridWindow
-		PadConfig *windows.PadConfigWindow
+		Editors []*windows.PresetEditWindow
 	}
 
 	Modal struct {
@@ -64,7 +64,6 @@ type BitboxEditor struct {
 
 func (b *BitboxEditor) afterCreateContext() {
 	b.implotCtx = implot.CreateContext()
-
 }
 
 func (b *BitboxEditor) beforeDestroyContext() {
@@ -72,14 +71,15 @@ func (b *BitboxEditor) beforeDestroyContext() {
 }
 
 func (b *BitboxEditor) beforeRender() {}
+
 func (b *BitboxEditor) afterRender() {
-	b.backend.Refresh()
-	//imgui.UpdatePlatformWindows()
-	//imgui.RenderPlatformWindowsDefault()
 }
+
 func (b *BitboxEditor) close() {
+	log.Info("Closing window")
 	b.backend.SetShouldClose(true)
 }
+
 func (b *BitboxEditor) onDrop(files []string) {
 	fmt.Println("Dropped files: ", files)
 }
@@ -108,7 +108,8 @@ func (b *BitboxEditor) setup() {
 	// Load theme
 	b.theme = theme.GetCurrentTheme()
 
-	// Create GLFW backend (be explicit with the generic parameter)
+	glfwbackend.ForceX11()
+
 	be, err := backend.CreateBackend[glfwbackend.GLFWWindowFlags](glfwbackend.NewGLFWBackend())
 	if err != nil {
 		panic(fmt.Errorf("failed to create GLFW backend: %w", err))
@@ -123,12 +124,10 @@ func (b *BitboxEditor) setup() {
 	b.backend.SetBeforeDestroyContextHook(b.beforeDestroyContext)
 
 	// Create the window
-	b.backend.SetBgColor(imgui.NewVec4(0.45, 0.55, 0.6, 1.0))
-	b.backend.CreateWindow("Bitbox Editor v0.0.0", 1200, 800)
-
+	b.backend.SetBgColor(b.theme.Style.Colors.ScrollbarBg.Vec4) //imgui.NewVec4(0.45, 0.55, 0.6, 1.0))
+	b.backend.CreateWindow("Bitbox Editor v0.0.0", 1400, 1000)
 	b.backend.SetIcons(icons...)
 
-	// Register window callbacks (window must exist)
 	b.backend.SetCloseCallback(b.close)
 	b.backend.SetDropCallback(b.onDrop)
 
@@ -138,53 +137,65 @@ func (b *BitboxEditor) setup() {
 
 	// Setup IO
 	io := imgui.CurrentIO()
-
 	io.SetIniFilename("ui.ini")
 	io.SetConfigFlags(imgui.ConfigFlagsDockingEnable)
-
 }
 
 func (b *BitboxEditor) initWindows() {
 	b.Window.Settings = windows.NewSettingsWindow()
 	b.Window.Console = windows.NewConsoleWindow()
 	b.Window.Storage = windows.NewStorageWindow()
-	b.Window.Presets = windows.NewPresetWindow()
+	b.Window.Presets = windows.NewPresetListWindow()
+	b.Window.Library = windows.NewLibraryWindow()
 
-	b.Window.PadGrid = windows.NewPadWindow()
-	b.Window.PadConfig = windows.NewPadConfigWindow()
-	b.Window.test = windows.NewWavPlotWindow()
+	b.Window.Editors = make([]*windows.PresetEditWindow, 0)
 
-	// set initial states
 	b.Window.Settings.Close()
 
-	//b.Window.Viewers = make([]*windows.ViewerWindow, 0)
+	// Register Storage Window events
 	b.Window.Storage.Events.AddListener(
 		func(ctx context.Context, record events.StorageEventRecord) {
 			if record.Type == events.StorageActivatedEvent {
-				//log.Info(record.Path)
 				b.Window.Presets.SetPresetLocation(record.Data.(*windows.StorageLocation))
+				b.Window.Library.SetStorageLocation(record.Data.(*windows.StorageLocation))
 			}
 		},
 	)
 
+	// Register Preset Window events
 	b.Window.Presets.Events.AddListener(
 		func(ctx context.Context, record events.PresetEventRecord) {
 			switch record.Type {
 			case events.LoadPreset:
 				p := record.Data.(*preset.Preset)
-				b.Window.PadGrid.SetPreset(p)
-				b.Window.PadConfig.SetPreset(p)
+
+				// Check if we already have the window open and focus it.
+				for _, win := range b.Window.Editors {
+					if win.Preset() == p {
+						imgui.SetWindowFocusStr(win.Title())
+						return
+					}
+				}
+
+				// Create  open a new Preset Edit Window
+				editWindow := windows.NewPresetEditWindow(p)
+				editWindow.SetPreset(p)
+				editWindow.Open()
+
+				editWindow.WindowEvents.AddListener(
+					func(ctx context.Context, record uiEvents.WindowEventRecord) {
+						switch record.Type {
+						case uiEvents.WindowClose:
+							println("WINDOW CLOSE")
+							b.Window.Editors = append(b.Window.Editors[:len(b.Window.Editors)-1])
+						}
+					},
+					fmt.Sprintf("%s-window-events", editWindow.Title()),
+				)
+
+				b.Window.Editors = append(b.Window.Editors, editWindow)
 			}
 		})
-
-	b.Window.PadGrid.Events.AddListener(func(ctx context.Context, record uiEvents.PadEventRecord) {
-		switch record.Type {
-		case uiEvents.PadActivated:
-			b.Window.PadConfig.SetPad(record.Data.(*component.PadComponent))
-			//b.Window.PadConfigWindow.Open()
-		}
-	},
-		"pad-events")
 
 }
 
@@ -218,20 +229,6 @@ func (b *BitboxEditor) menu() {
 			imgui.EndMenu()
 		}
 
-		if imgui.BeginMenu("Window") {
-
-			if imgui.MenuItemBoolV(
-				"NewConsoleWindow",
-				"ALT+6",
-				b.Window.Console.IsOpen(),
-				true) {
-
-				b.Window.Console.Open()
-			}
-
-			imgui.EndMenu()
-		}
-
 		if imgui.BeginMenu("Help") {
 			imgui.EndMenu()
 		}
@@ -259,12 +256,20 @@ func (b *BitboxEditor) toolbar() {
 	imgui.SetNextWindowSize(imgui.Vec2{X: viewportSize.X, Y: toolbarHeight})
 
 	imgui.BeginV("toolbar", nil, toolbarFlags)
-	if imgui.Button("btn1") {
+	if imgui.Button(b.Window.Storage.Icon()) {
 		log.Debug("btn 1 clicked")
 	}
 	imgui.SameLine()
-	if imgui.Button("btn2") {
+	if imgui.Button(b.Window.Presets.Icon()) {
 		log.Debug("btn 2 clicked")
+	}
+	imgui.SameLine()
+	if imgui.Button(b.Window.Console.Icon()) {
+		log.Debug("btn 3 clicked")
+	}
+	imgui.SameLine()
+	if imgui.Button(b.Window.Library.Icon()) {
+		log.Debug("btn 4 clicked")
 	}
 	imgui.End()
 }
@@ -274,9 +279,10 @@ func (b *BitboxEditor) dockspace() {
 	viewportPos := viewport.Pos()
 	viewportSize := viewport.Size()
 
+	b.dockspaceID = imgui.IDStr("dockspace")
+
 	dockSpaceFlags := imgui.DockNodeFlagsPassthruCentralNode
 
-	dockSpace := imgui.IDStr("dockspace")
 	dockspacePos := imgui.Vec2{
 		X: viewportPos.X,
 		Y: viewportPos.Y + imgui.FrameHeight() + toolbarHeight,
@@ -304,7 +310,7 @@ func (b *BitboxEditor) dockspace() {
 			imgui.WindowFlagsNoCollapse,
 	)
 
-	imgui.DockSpaceV(dockSpace, imgui.Vec2{X: 0, Y: 0}, dockSpaceFlags, windowClass)
+	imgui.DockSpaceV(b.dockspaceID, imgui.Vec2{X: 0, Y: 0}, dockSpaceFlags, windowClass)
 	imgui.End()
 }
 
@@ -321,32 +327,43 @@ func (b *BitboxEditor) loop() {
 		b.initialized = true
 	}
 
-	// Set theme and pop theme after loop
 	themeFin := b.theme.Apply()
 
 	defer themeFin()
 
-	// Main app framework
 	b.menu()
 	b.toolbar()
 	b.dockspace()
 
 	// Layout windows
-	b.Window.Console.Build()
-	b.Window.Storage.Build()
-	b.Window.Presets.Build()
-	b.Window.PadGrid.Build()
-	b.Window.PadConfig.Build()
-
-	b.Window.test.Build()
+	if b.Window.Console.IsOpen() {
+		b.Window.Console.Build()
+	}
 
 	if b.Window.Settings.IsOpen() {
 		b.Window.Settings.Build()
 	}
+
+	if b.Window.Storage.IsOpen() {
+		b.Window.Storage.Build()
+	}
+
+	if b.Window.Presets.IsOpen() {
+		b.Window.Presets.Build()
+	}
+
+	if b.Window.Library.IsOpen() {
+		b.Window.Library.Build()
+	}
+
+	for _, editWindow := range b.Window.Editors {
+		imgui.SetNextWindowDockIDV(b.dockspaceID, imgui.CondOnce)
+		editWindow.Build()
+	}
+
 }
 
 func (b *BitboxEditor) Run() {
-	// Guard both nil interface and typed-nil concrete
 	if b.backend == nil {
 		panic("backend is nil: setup() did not initialize the backend")
 	}
@@ -364,6 +381,7 @@ func NewBitboxEditor() *BitboxEditor {
 	app := &BitboxEditor{
 		initialized: false,
 	}
+
 	app.setup()
 
 	fonts.RebuildFonts(app.backend)

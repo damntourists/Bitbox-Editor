@@ -28,7 +28,6 @@ func (m *WaveMarker) EndSeconds(sampleRate int, samplesPerBin float64) float64 {
 	return (m.end * samplesPerBin) / float64(sampleRate)
 }
 
-// DrawInteract Handles marker interactions from user
 func (m *WaveMarker) DrawInteract(
 	idx int,
 	leftBound,
@@ -44,9 +43,8 @@ func (m *WaveMarker) DrawInteract(
 	col := imgui.NewColor(1, 0, 1, 1).FieldValue
 	flags := implot.DragToolFlagsNone
 
-	var oc, oh, held = false, false, false
-	if implot.DragLineXV(int32(idx+1), &m.start, col, 3.0, flags, &oc, &oh, &held) {
-		// Clamp into neighbor-aware bounds while dragging
+	var outClicked = false
+	if implot.DragLineXV(int32(idx+1), &m.start, col, 3.0, flags, &outClicked, &m.Hovered, &m.Held) {
 		if m.start < leftBound {
 			m.start = leftBound
 		}
@@ -54,35 +52,35 @@ func (m *WaveMarker) DrawInteract(
 			m.start = rightBound
 		}
 
-		// Timestamp label near cursor while dragging
+		labelColor := imgui.NewVec4(1, 0.2, 1, 0.50)
+		if m.start <= leftBound || m.start >= rightBound {
+			labelColor = imgui.NewVec4(1, 0.5, 0, 0.80)
+		}
+
 		sec := (m.start * samplesPerBin) / float64(sampleRate)
+
 		implot.AnnotationStr(
 			m.start,
 			0,
-			imgui.NewVec4(1, 0.2, 1, 0.50),
+			labelColor,
 			imgui.Vec2{X: 0, Y: 0},
 			true,
 			secondsLabel(sec),
 		)
 	}
 
-	// Persist interaction
-	m.Hovered = oh
-	m.Held = held
-
 	// Middle-click on the marker to remove it
-	if oh && !m.Held && imgui.IsMouseClickedBool(imgui.MouseButtonMiddle) {
+	if m.Hovered && !m.Held && imgui.IsMouseClickedBool(imgui.MouseButtonMiddle) {
 		m.WantRemove = true
 	}
 
-	// Open the popup based on the marker hover
+	// Context menu on right-click
 	ctxID := fmt.Sprintf("marker_ctx_%p", m)
-	if oh && imgui.IsMouseClickedBool(imgui.MouseButtonRight) {
+	if m.Hovered && imgui.IsMouseClickedBool(imgui.MouseButtonRight) {
 		m.Active = true
 		imgui.OpenPopupStr(ctxID)
 	}
 
-	// Ensure clamping even if no drag this frame
 	if m.start < leftBound {
 		m.start = leftBound
 	}
@@ -90,7 +88,6 @@ func (m *WaveMarker) DrawInteract(
 		m.start = rightBound
 	}
 
-	// Update endpoint
 	endBin := rightBound
 	if !math.IsInf(nextStart, 1) {
 		endBin = nextStart - minGapBins
@@ -118,7 +115,6 @@ func (m *WaveMarker) DrawInteract(
 		)
 	}
 
-	// Render popup context menu
 	if imgui.BeginPopup(ctxID) {
 		if imgui.MenuItemBool("Remove") {
 			m.WantRemove = true
@@ -126,11 +122,10 @@ func (m *WaveMarker) DrawInteract(
 		}
 		imgui.EndPopup()
 	} else if m.Active && !imgui.IsPopupOpenStrV(ctxID, imgui.PopupFlagsNone) {
-		// Clear Active when context menu is closed
 		m.Active = false
 	}
 
-	// Draw label above marker with marker's identifier
+	// Draw label above marker
 	implot.AnnotationStr(
 		m.start,
 		yMax,
@@ -143,10 +138,20 @@ func (m *WaveMarker) DrawInteract(
 	return
 }
 
-// Bounds computes neighbor-aware clamping limits
-func (m *WaveMarker) Bounds(idx int, slices []*WaveMarker, xMin, xMax, minGapBins float64) (left, right float64) {
+func (m *WaveMarker) Bounds(
+	idx int,
+	slices []*WaveMarker,
+	xMin, xMax, minGapBins float64,
+	boundsMarker *WaveBoundsMarker,
+) (left, right float64) {
 	left = xMin
 	right = xMax
+
+	if boundsMarker != nil {
+		left = boundsMarker.Start
+		right = boundsMarker.End
+	}
+
 	if idx > 0 {
 		left = math.Max(left, slices[idx-1].start+minGapBins)
 	}

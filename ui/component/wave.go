@@ -1,10 +1,13 @@
 package component
 
 import (
+	"bitbox-editor/lib/parsing/bitbox"
+	"bitbox-editor/ui/theme"
 	"fmt"
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"bitbox-editor/lib/audio"
@@ -17,11 +20,14 @@ import (
 type WaveComponent struct {
 	*Component
 
-	wav *audio.WaveFile
+	wav  *audio.WaveFile
+	cell *bitbox.Cell
 
-	cursor *WaveMarker
+	cursor *WaveCursor
 
 	slices []*WaveMarker
+
+	bounds *WaveBoundsMarker
 
 	plotFlags  implot.Flags
 	axisXFlags implot.AxisFlags
@@ -32,32 +38,67 @@ type WaveComponent struct {
 
 	samplesPerBin float64
 
-	loading bool
+	mu   sync.Mutex
+	once sync.Once
 }
 
-func (wc *WaveComponent) LoadWav(path string) {
-	wc.loading = true
-	go func() {
-		var err error
-		wc.wav, err = audio.LoadWAVFile(path)
-		if err != nil {
-			wc.loading = false
-			panic(err)
-		}
+func (wc *WaveComponent) Bounds() *WaveBoundsMarker {
+	return wc.bounds
+}
 
-		wc.calculatePlotLimits()
-		wc.calculateSamplesPerBin()
+func (wc *WaveComponent) SetBounds(start, end float64) {
+	if wc.bounds == nil {
+		wc.bounds = NewWaveBoundsMarker(start, end)
+	} else {
+		wc.bounds.Start = start
+		wc.bounds.End = end
+	}
+}
 
-		wc.loading = false
-	}()
+func (wc *WaveComponent) Cursor() *WaveCursor {
+	return wc.cursor
+}
+
+func (wc *WaveComponent) Slices() []*WaveMarker {
+	return wc.slices
+}
+
+func (wc *WaveComponent) Wav() *audio.WaveFile {
+	return wc.wav
+}
+
+func (wc *WaveComponent) SetCursor(cursor *WaveCursor) {
+	wc.cursor = cursor
+}
+
+func (wc *WaveComponent) SetSlices(slices []*WaveMarker) {
+	wc.slices = slices
+}
+
+func (wc *WaveComponent) ClearSlices() {
+	wc.slices = make([]*WaveMarker, 0)
+}
+
+func (wc *WaveComponent) IsLoading() bool {
+	return wc.wav.IsLoading()
+}
+
+func (wc *WaveComponent) SetCell(cell *bitbox.Cell) {
+	wc.cell = cell
 }
 
 func (wc *WaveComponent) SetWav(wav *audio.WaveFile) {
-	wc.loading = true
+	wc.ClearSlices()
+
 	wc.wav = wav
+
+	err := wav.Load()
+	if err != nil {
+		log.Error(err.Error())
+	}
 	wc.calculatePlotLimits()
 	wc.calculateSamplesPerBin()
-	wc.loading = false
+	wc.SetBounds(0, wc.xLimitMax)
 }
 
 func (wc *WaveComponent) calculatePlotLimits() {
@@ -94,16 +135,13 @@ func (wc *WaveComponent) drawOutOfBounds() {
 	plotLeftPx := plotPos.X
 	plotRightPx := plotPos.X + plotSize.X
 
-	// Data range in bins
 	dataStart := 0.0
 	dataEnd := wc.xLimitMax
 
-	// Convert dataStart/dataEnd
 	yMin := float64(wc.wav.MinY)
 	pStart := implot.PlotToPixelsdoubleV(dataStart, yMin, implot.AxisX1, implot.AxisY1)
 	pEnd := implot.PlotToPixelsdoubleV(dataEnd, yMin, implot.AxisX1, implot.AxisY1)
 
-	// Clamp to plot horizontal bounds
 	startPx := pStart.X
 	endPx := pEnd.X
 	if startPx < plotLeftPx {
@@ -119,7 +157,6 @@ func (wc *WaveComponent) drawOutOfBounds() {
 		endPx = plotRightPx
 	}
 
-	// Draw semi-transparent overlays on left and right outside the data range
 	draw := implot.GetPlotDrawList()
 	shade := imgui.NewColor(0, 0, 0, 0.25).Pack()
 
@@ -143,14 +180,207 @@ func (wc *WaveComponent) drawOutOfBounds() {
 
 }
 
+func (wc *WaveComponent) drawBoundsMarker() {
+	if wc.bounds != nil {
+		wc.bounds.DrawInteract(
+			wc.samplesPerBin,
+			wc.wav.SampleRate,
+			wc.xLimitMin,
+			wc.xLimitMax,
+			float64(wc.wav.MinY),
+			float64(wc.wav.MaxY),
+		)
+	}
+}
+
+func (wc *WaveComponent) drawCursor() {
+	if wc.wav.IsPlaying() {
+		t := theme.GetCurrentTheme()
+
+		progress := wc.wav.Progress()
+		cursorBin := progress * wc.xLimitMax
+		implot.PushStyleColorVec4(implot.ColLine, t.Style.Colors.NavHighlight.Vec4)
+		implot.PlotInfLinesdoublePtr(
+			"playback cursor", &cursorBin, 1,
+		)
+		implot.PopStyleColor()
+
+		if wc.cursor != nil {
+			wc.cursor.position = cursorBin
+		}
+	}
+}
+
+func (wc *WaveComponent) drawSliceMarkers() {
+	minGapSec := 0.010
+	minGapBins := math.Ceil((minGapSec * float64(wc.wav.SampleRate)) / wc.samplesPerBin)
+
+	if len(wc.slices) > 0 {
+		sort.Slice(wc.slices, func(i, j int) bool { return wc.slices[i].start < wc.slices[j].start })
+
+		for idx, mk := range wc.slices {
+			left, right := mk.Bounds(
+				idx,
+				wc.slices,
+				wc.xLimitMin,
+				wc.xLimitMax,
+				minGapBins,
+				wc.bounds,
+			)
+			nextStart := math.Inf(1)
+			if idx < len(wc.slices)-1 {
+				nextStart = wc.slices[idx+1].start
+			}
+
+			mk.DrawInteract(
+				idx,
+				left, right,
+				nextStart,
+				minGapBins,
+				wc.samplesPerBin,
+				wc.wav.SampleRate,
+				float64(wc.wav.MinY),
+				float64(wc.wav.MaxY),
+			)
+		}
+
+		if func() bool {
+			removed := false
+			dst := wc.slices[:0]
+
+			minBound := 0.0
+			maxBound := wc.xLimitMax
+			if wc.bounds != nil {
+				minBound = wc.bounds.Start
+				maxBound = wc.bounds.End
+			}
+
+			for _, m := range wc.slices {
+				if m.WantRemove || m.start < minBound || m.start > maxBound {
+					removed = true
+					continue
+				}
+				dst = append(dst, m)
+			}
+			if removed {
+				wc.slices = dst
+			}
+			return removed
+		}() {
+			// other actions to perform after removal
+		}
+	}
+}
+
+func (wc *WaveComponent) drawWaveform() {
+
+	for c := 0; c < len(wc.wav.Channels); c++ {
+
+		ys := wc.wav.Channels[c]
+
+		if len(ys) > 2000 {
+			// Plot downsampled data
+			implot.PlotShadedS64PtrInt(
+				"ch_min_"+strconv.Itoa(c),
+				utils.SliceToPtr(wc.wav.Downsamples[c].Mins),
+				int32(len(wc.wav.Downsamples[c].Mins)),
+			)
+			implot.PlotShadedS64PtrInt(
+				"ch_max_"+strconv.Itoa(c),
+				utils.SliceToPtr(wc.wav.Downsamples[c].Maxs),
+				int32(len(wc.wav.Downsamples[c].Maxs)),
+			)
+		} else {
+			// Plot standard data
+			implot.PlotShadedS64PtrInt(
+				"ch_"+strconv.Itoa(c),
+				utils.SliceToPtr(ys),
+				int32(len(ys)),
+			)
+		}
+	}
+}
+
+func (wc *WaveComponent) handleUserInteraction() {
+	if implot.IsPlotHovered() &&
+		imgui.IsMouseClickedBool(imgui.MouseButtonMiddle) {
+		mp := implot.GetPlotMousePos()
+
+		x := math.Round(mp.X)
+
+		minBound := 0.0
+		maxBound := wc.xLimitMax
+
+		if wc.bounds != nil {
+			minBound = wc.bounds.Start
+			maxBound = wc.bounds.End
+		}
+
+		if x < minBound {
+			x = minBound
+		}
+
+		if x > maxBound {
+			x = maxBound
+		}
+
+		if x >= minBound && x <= maxBound {
+			mk := &WaveMarker{
+				start: x,
+			}
+			wc.slices = append(wc.slices, mk)
+
+		}
+	}
+}
+
+func (wc *WaveComponent) drawTimeTicks() {
+
+	sampleRate := wc.wav.SampleRate
+	totalSamples := wc.wav.Len
+	xCount := int(wc.xLimitMax) + 1
+
+	if sampleRate <= 0 || totalSamples <= 0 || xCount <= 0 {
+		return
+	}
+	totalSec := float64(totalSamples) / float64(sampleRate)
+	samplesPerBin := float64(totalSamples) / float64(xCount)
+
+	targetTicks := 10.0
+	rawStep := totalSec / targetTicks
+	niceSteps := []float64{0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60}
+	step := niceSteps[len(niceSteps)-1]
+	for _, s := range niceSteps {
+		if s >= rawStep {
+			step = s
+			break
+		}
+	}
+
+	count := int(math.Floor(totalSec/step)) + 1
+	positions := make([]float64, count)
+	labels := make([]string, count)
+	for i := 0; i < count; i++ {
+		tsec := float64(i) * step
+		positions[i] = (tsec * float64(sampleRate)) / samplesPerBin // bin index
+		labels[i] = secondsLabel(tsec)
+	}
+
+	implot.SetupAxisTicksdoublePtrV(
+		implot.AxisX1,
+		utils.SliceToPtr(positions),
+		int32(len(positions)),
+		labels,
+		false)
+}
+
 func (wc *WaveComponent) Layout() {
-	if wc.wav == nil && !wc.loading {
+	if wc.Wav() == nil {
 		imgui.Text("No wav loaded")
 		return
 	}
 
-	if wc.loading {
-		// Create an empty plot and display spinner over it
+	if wc.IsLoading() {
 		dummySlice := []int64{0}
 
 		cur := imgui.CursorPos()
@@ -175,13 +405,11 @@ func (wc *WaveComponent) Layout() {
 			Y: radius*2 + style.FramePadding().Y*2,
 		}
 
-		// Center within the remaining content.
 		centerLocal := imgui.Vec2{
 			X: cur.X + (avail.X-spinnerSize.X)/2,
 			Y: cur.Y + (avail.Y-spinnerSize.Y)/2,
 		}
 
-		// Display loading spinner overlapping dummy plot
 		imgui.SetNextItemAllowOverlap()
 
 		imgui.SetCursorPos(centerLocal)
@@ -196,122 +424,56 @@ func (wc *WaveComponent) Layout() {
 		return
 	}
 
-	// Create actual plot once wav is fully loaded
+	imgui.PushStyleVarVec2(imgui.StyleVarFramePadding, imgui.Vec2{X: 0, Y: 0})
+	defer imgui.PopStyleVar()
+
+	implot.PushStyleVarVec2(implot.StyleVarPlotPadding, imgui.Vec2{X: 0, Y: 0})
+	defer implot.PopStyleVar()
+
+	implot.PushStyleVarVec2(implot.StyleVarLabelPadding, imgui.Vec2{X: 0, Y: 0})
+	defer implot.PopStyleVar()
+
+	// TODO: Make colormap configurable
+	implot.PushColormapPlotColormap(implot.ColormapCool)
+	defer implot.PopColormap()
+
 	if implot.BeginPlotV(wc.Component.IDStr(), imgui.Vec2{X: -1, Y: -1}, wc.plotFlags) {
 		implot.SetupAxesV("Time", "Amplitude", wc.axisXFlags, wc.axisYFlags)
 		implot.SetupAxisLimitsV(implot.AxisX1, wc.xLimitMin, wc.xLimitMax, implot.CondOnce)
 		implot.SetupAxisLimitsV(implot.AxisY1, wc.yLimitMin, wc.yLimitMax, implot.CondOnce)
 
-		// Add time tick marks
-		setupTimeTicks(wc.wav.SampleRate, wc.wav.Len, int(wc.xLimitMax)+1)
+		wc.drawTimeTicks()
 
-		if implot.IsPlotHovered() && imgui.IsMouseClickedBool(imgui.MouseButtonMiddle) {
-			mp := implot.GetPlotMousePos()
+		wc.handleUserInteraction()
 
-			// Snap to nearest bin and clamp
-			x := math.Round(mp.X)
-			if x < 0 {
-				x = 0
-			}
+		wc.drawWaveform()
 
-			if x > wc.xLimitMax {
-				x = wc.xLimitMax
-			}
-
-			// Create a slice marker at the clicked bin
-			mk := &WaveMarker{
-				start: x,
-			}
-			wc.slices = append(wc.slices, mk)
-		}
-
-		// TODO: Make colormap configurable
-		implot.PushColormapPlotColormap(implot.ColormapCool)
-		defer implot.PopColormap()
-
-		for c := 0; c < len(wc.wav.Channels); c++ {
-
-			ys := wc.wav.Channels[c]
-
-			if len(ys) > 2000 {
-				// Plot downsampled data
-				implot.PlotShadedS64PtrInt(
-					"ch_min_"+strconv.Itoa(c),
-					utils.SliceToPtr(wc.wav.Downsamples[c].Mins),
-					int32(len(wc.wav.Downsamples[c].Mins)),
-				)
-				implot.PlotShadedS64PtrInt(
-					"ch_max_"+strconv.Itoa(c),
-					utils.SliceToPtr(wc.wav.Downsamples[c].Maxs),
-					int32(len(wc.wav.Downsamples[c].Maxs)),
-				)
-			} else {
-				// Plot standard data
-				implot.PlotShadedS64PtrInt(
-					"ch_"+strconv.Itoa(c),
-					utils.SliceToPtr(ys),
-					int32(len(ys)),
-				)
-			}
-		}
-
-		// Shade outside the WAV range to make start/end obvious
 		wc.drawOutOfBounds()
 
-		// Minimum gap between markers
-		minGapSec := 0.010
-		minGapBins := math.Ceil((minGapSec * float64(wc.wav.SampleRate)) / wc.samplesPerBin)
+		wc.drawCursor()
 
-		if len(wc.slices) > 0 {
-			sort.Slice(wc.slices, func(i, j int) bool { return wc.slices[i].start < wc.slices[j].start })
+		wc.drawBoundsMarker()
 
-			for idx, mk := range wc.slices {
-				left, right := mk.Bounds(idx, wc.slices, wc.xLimitMin, wc.xLimitMax, minGapBins)
-				nextStart := math.Inf(1)
-				if idx < len(wc.slices)-1 {
-					nextStart = wc.slices[idx+1].start
-				}
-
-				mk.DrawInteract(
-					idx,
-					left, right,
-					nextStart,
-					minGapBins,
-					wc.samplesPerBin,
-					wc.wav.SampleRate,
-					float64(wc.wav.MinY),
-					float64(wc.wav.MaxY),
-				)
-			}
-
-			// Remove markers that request removal
-			if func() bool {
-				removed := false
-				dst := wc.slices[:0]
-				for _, m := range wc.slices {
-					if m.WantRemove {
-						removed = true
-						continue
-					}
-					dst = append(dst, m)
-				}
-				if removed {
-					wc.slices = dst
-				}
-				return removed
-			}() {
-				// other actions to perform after removal here
-			}
-		}
+		wc.drawSliceMarkers()
 
 		implot.EndPlot()
 	}
 }
 
-func NewWaveformComponent(label string) *WaveComponent {
+func secondsLabel(sec float64) string {
+	// mm:ss.mmm
+	d := time.Duration(sec * float64(time.Second))
+	minutes := int(d / time.Minute)
+	rem := d % time.Minute
+	return fmt.Sprintf("%02d:%06.2f", minutes, rem.Seconds())
+}
+
+func NewWaveformComponent(id imgui.ID) *WaveComponent {
 	cmp := &WaveComponent{
-		Component: NewComponent(imgui.IDStr(label)),
-		cursor:    &WaveMarker{start: 0.0},
+		Component: NewComponent(id),
+		wav:       nil,
+		cursor:    &WaveCursor{position: 0.0},
+		slices:    make([]*WaveMarker, 0),
 
 		plotFlags: implot.FlagsNoMenus |
 			implot.FlagsCrosshairs |
@@ -333,54 +495,5 @@ func NewWaveformComponent(label string) *WaveComponent {
 
 	cmp.Component.layoutBuilder = cmp
 
-	defer cmp.LoadWav("/home/brett/Downloads/micro_bundle-v3/Soundopolis/Sci Fi/Texture_Alien_Bugs_002.wav") //filepath)
-
 	return cmp
-}
-
-func secondsLabel(sec float64) string {
-	// mm:ss.mmm
-	d := time.Duration(sec * float64(time.Second))
-	minutes := int(d / time.Minute)
-	rem := d % time.Minute
-	return fmt.Sprintf("%02d:%06.2f", minutes, rem.Seconds())
-}
-
-func setupTimeTicks(sampleRate int, totalSamples int, xCount int) {
-	if sampleRate <= 0 || totalSamples <= 0 || xCount <= 0 {
-		return
-	}
-	totalSec := float64(totalSamples) / float64(sampleRate)
-	samplesPerBin := float64(totalSamples) / float64(xCount)
-
-	// Choose a step that gives ~8–12 ticks across the whole file (tune as needed)
-	targetTicks := 10.0
-	rawStep := totalSec / targetTicks
-	// Snap to “nice” steps: 0.1, 0.2, 0.5, 1, 2, 5, 10, ...
-	niceSteps := []float64{0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60}
-	step := niceSteps[len(niceSteps)-1]
-	for _, s := range niceSteps {
-		if s >= rawStep {
-			step = s
-			break
-		}
-	}
-
-	// Positions are bin indices corresponding to each tick time:
-	// index = (tsec * sampleRate) / samplesPerBin
-	count := int(math.Floor(totalSec/step)) + 1
-	positions := make([]float64, count)
-	labels := make([]string, count)
-	for i := 0; i < count; i++ {
-		tsec := float64(i) * step
-		positions[i] = (tsec * float64(sampleRate)) / samplesPerBin // bin index
-		labels[i] = secondsLabel(tsec)
-	}
-
-	implot.SetupAxisTicksdoublePtrV(
-		implot.AxisX1,
-		utils.SliceToPtr(positions),
-		int32(len(positions)),
-		labels,
-		false)
 }

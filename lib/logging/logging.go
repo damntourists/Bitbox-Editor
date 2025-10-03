@@ -44,7 +44,6 @@ var cfg = zap.Config{
 	Development: true,
 	Encoding:    "json",
 	EncoderConfig: zapcore.EncoderConfig{
-		// Keys can be anything except the empty string.
 		TimeKey:        "ts",
 		LevelKey:       "level",
 		NameKey:        "name",
@@ -79,6 +78,5 @@ func init() {
 
 func NewLogger(name string) *zap.Logger {
 	l := RootLogger.Named(name)
-	l.Debug("Logger created.")
 	return l
 }

@@ -5,6 +5,7 @@ import (
 	"bitbox-editor/ui/events"
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/maniartech/signals"
@@ -23,13 +24,53 @@ type PadGridComponent struct {
 	Events signals.Signal[events.PadEventRecord]
 }
 
+func (p *PadGridComponent) SetRows(rows int) *PadGridComponent {
+	p.rows = rows
+	return p
+}
+
+func (p *PadGridComponent) SetCols(cols int) *PadGridComponent {
+	p.cols = cols
+	return p
+}
+
+func (p *PadGridComponent) SetPadSize(size int) *PadGridComponent {
+	p.padSize = size
+	return p
+}
+
 func (p *PadGridComponent) SetPreset(preset *preset.Preset) *PadGridComponent {
 	p.preset = preset
 	for _, cell := range preset.BitboxConfig().Session.Cells {
+		if cell.Row == nil || cell.Column == nil {
+			continue
+		}
 
+		pad := p.Pad(*cell.Row, *cell.Column)
+		if pad != nil {
+			if pad.wave == nil {
+
+				for _, wav := range preset.Wavs() {
+					resolvedPath, _ := preset.ResolveFile(cell.Filename)
+					if wav.Name == filepath.Base(resolvedPath) {
+						pad.SetWave(wav)
+					}
+				}
+
+			}
+		}
 	}
 
 	return p
+}
+
+func (p *PadGridComponent) Pad(row, col int) *PadComponent {
+	for _, pad := range p.pads {
+		if pad.Row() == row && pad.Col() == col {
+			return pad
+		}
+	}
+	return nil
 }
 
 func (p *PadGridComponent) Layout() {
@@ -39,7 +80,7 @@ func (p *PadGridComponent) Layout() {
 
 	for i, pad := range p.pads {
 		if p.selectedPad != nil {
-			if pad.row == p.selectedPad.row && pad.col == p.selectedPad.col {
+			if pad == p.selectedPad {
 				pad.SetSelected(true)
 			} else {
 				pad.SetSelected(false)
@@ -65,18 +106,19 @@ func NewPadGrid(id imgui.ID, rows, cols, size int) *PadGridComponent {
 		Events:    signals.New[events.PadEventRecord](),
 	}
 
-	for i := 0; i < cmp.rows; i++ {
-		for j := 0; j < cmp.cols; j++ {
+	cmp.Component.layoutBuilder = cmp
+
+	// TODO: Make configurable
+	for r := 0; r < cmp.rows; r++ {
+		for c := 0; c < cmp.cols; c++ {
 			pc := NewPadComponent(
-				imgui.IDStr(fmt.Sprintf("pad-%dx%d", i, j)),
-				i,
-				j,
-				fmt.Sprintf("row: %d", i),
-				fmt.Sprintf("col: %d", j),
-				"...",
+				imgui.IDStr(fmt.Sprintf("pad-%dx%d", r, c)),
+				r, c,
+				"unset", "", "",
+				float32(size),
 			)
 
-			pc.MouseEvents.AddListener(func(ctx context.Context, record events.MouseEventRecord) {
+			pc.MouseEvents().AddListener(func(ctx context.Context, record events.MouseEventRecord) {
 				switch record.Type {
 				case events.Clicked:
 					cmp.selectedPad = pc
@@ -85,12 +127,11 @@ func NewPadGrid(id imgui.ID, rows, cols, size int) *PadGridComponent {
 						Data: pc,
 					})
 				}
-			}, "pad-mouse-events")
+			}, fmt.Sprintf("%s-%dx%d-mouse-events", pc.IDStr(), r, c))
 			cmp.pads = append(cmp.pads, pc)
 		}
 
 	}
 
-	cmp.Component.layoutBuilder = cmp
 	return cmp
 }

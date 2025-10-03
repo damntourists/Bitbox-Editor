@@ -87,7 +87,7 @@ func (w *StorageWindow) Layout() {
 			Selectable(true).
 			SetSelected(isSelected)
 		selectable.SetData(p)
-		selectable.MouseEvents.AddListener(
+		selectable.MouseEvents().AddListener(
 			func(ctx context.Context, e uiEvents.MouseEventRecord) {
 				switch e.Type {
 				case uiEvents.Clicked:
@@ -119,7 +119,7 @@ func (w *StorageWindow) Layout() {
 			Selectable(true).
 			SetSelected(isSelected)
 		selectable.SetData(p)
-		selectable.MouseEvents.AddListener(
+		selectable.MouseEvents().AddListener(
 			func(ctx context.Context, e uiEvents.MouseEventRecord) {
 				switch e.Type {
 				case uiEvents.Clicked:
@@ -146,11 +146,11 @@ func (w *StorageWindow) Layout() {
 
 	w.driveTable.
 		Columns(
-			component.TableColumn("##icon").
+			component.NewTableColumn("##icon").
 				Flags(
 					imgui.TableColumnFlagsWidthFixed,
 				),
-			component.TableColumn("Name").
+			component.NewTableColumn("Name").
 				Flags(
 					imgui.TableColumnFlagsWidthStretch,
 				),
@@ -162,9 +162,9 @@ func (w *StorageWindow) Layout() {
 
 func NewStorageWindow() *StorageWindow {
 	sw := &StorageWindow{
-		Window:       NewWindow("Storage", "HardDrive", NewWindowConfig()),
+		Window:       NewWindow("Storage", "HardDrive"),
 		driveMonitor: true,
-		driveTable: component.Table(imgui.IDStr("storage-table")).
+		driveTable: component.NewTableComponent(imgui.IDStr("storage-table")).
 			NoHeader(true),
 		driveLocations:  make([]*StorageLocation, 0),
 		customLocations: make([]*StorageLocation, 0),
@@ -172,7 +172,6 @@ func NewStorageWindow() *StorageWindow {
 	}
 	sw.Window.layoutBuilder = sw
 
-	// Start drive detect goroutine
 	go func() {
 		log.Debug("Starting drive detection")
 		for {
@@ -184,14 +183,12 @@ func NewStorageWindow() *StorageWindow {
 							continue
 						}
 
-						// Check if we have new drives
 						exists := false
 						for _, sd := range sw.driveLocations {
 							if sd.path == d {
 								exists = true
 							}
 
-							// also check if stale
 							_, err := os.Stat(sd.path)
 							if err != nil {
 								if !sd.stale {
@@ -221,7 +218,6 @@ func NewStorageWindow() *StorageWindow {
 						}
 
 						if !exists {
-							// Create new location
 							sl := &StorageLocation{
 								storageType: RemovableStorage,
 								name:        d,
@@ -241,8 +237,6 @@ func NewStorageWindow() *StorageWindow {
 						}
 					}
 
-				} else {
-					//log.Debug(err.Error())
 				}
 			}
 

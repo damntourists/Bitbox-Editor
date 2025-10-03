@@ -15,20 +15,6 @@ type TableColumnComponent struct {
 	sortFn             func(SortDirection)
 }
 
-func TableColumn(label string) *TableColumnComponent {
-	cmp := &TableColumnComponent{
-		Component: NewComponent(
-			imgui.IDStr(fmt.Sprintf("table-column::%s", label)),
-		),
-		label:              label,
-		flags:              0,
-		innerWidthOrWeight: 0,
-		userID:             0,
-	}
-	//cmp.Component.layoutBuilder = cmp
-	return cmp
-}
-
 func (tcc *TableColumnComponent) Flags(flags imgui.TableColumnFlags) *TableColumnComponent {
 	tcc.flags = flags
 	return tcc
@@ -51,4 +37,18 @@ func (tcc *TableColumnComponent) Layout() {
 		tcc.innerWidthOrWeight,
 		imgui.IDInt(tcc.userID),
 	)
+}
+
+func NewTableColumn(label string) *TableColumnComponent {
+	cmp := &TableColumnComponent{
+		Component: NewComponent(
+			imgui.IDStr(fmt.Sprintf("table-column::%s", label)),
+		),
+		label:              label,
+		flags:              0,
+		innerWidthOrWeight: 0,
+		userID:             0,
+	}
+	cmp.Component.layoutBuilder = cmp
+	return cmp
 }

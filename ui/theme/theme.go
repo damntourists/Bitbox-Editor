@@ -116,6 +116,8 @@ type (
 		TabActive             rgba
 		TabUnfocused          rgba
 		TabUnfocusedActive    rgba
+		DockingPreview        rgba
+		DockingEmptyBg        rgba
 		PlotLines             rgba
 		PlotLinesHovered      rgba
 		PlotHistogram         rgba
@@ -296,6 +298,10 @@ func (t *Theme) Apply() func() {
 	imgui.PushStyleColorVec4(imgui.ColTabSelected, t.Style.Colors.TabActive.Vec4)
 	imgui.PushStyleColorVec4(imgui.ColTabDimmed, t.Style.Colors.TabUnfocused.Vec4)
 	imgui.PushStyleColorVec4(imgui.ColTabDimmedSelected, t.Style.Colors.TabUnfocusedActive.Vec4)
+
+	imgui.PushStyleColorVec4(imgui.ColDockingEmptyBg, t.Style.Colors.DockingEmptyBg.Vec4)
+	imgui.PushStyleColorVec4(imgui.ColDockingPreview, t.Style.Colors.DockingPreview.Vec4)
+
 	imgui.PushStyleColorVec4(imgui.ColPlotLines, t.Style.Colors.PlotLines.Vec4)
 	imgui.PushStyleColorVec4(imgui.ColPlotLinesHovered, t.Style.Colors.PlotLinesHovered.Vec4)
 	imgui.PushStyleColorVec4(imgui.ColPlotHistogram, t.Style.Colors.PlotHistogram.Vec4)

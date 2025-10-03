@@ -2,6 +2,8 @@ package windows
 
 import (
 	"bitbox-editor/ui/component"
+
+	"github.com/AllenDang/cimgui-go/imgui"
 )
 
 type WavPlotWindow struct {
@@ -18,13 +20,11 @@ func (w *WavPlotWindow) Layout() {
 
 func NewWavPlotWindow() *WavPlotWindow {
 	sw := &WavPlotWindow{
-		Window: NewWindow("Wave", "AudioWaveform", NewWindowConfig()),
+		Window: NewWindow("Wave", "AudioWaveform"),
 		waveform: component.NewWaveformComponent(
-			"waveform",
+			imgui.IDStr("waveform"),
 		),
 	}
-
-	// 			"/home/brett/Downloads/micro_bundle-v3/Soundopolis/Sci Fi/Texture_Alien_Bugs_002.wav",
 
 	sw.Window.layoutBuilder = sw
 

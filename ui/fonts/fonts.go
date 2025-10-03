@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	lucide         = "fonticons/Lucide/lucide.ttf" //"fonts/lucide.ttf"
+	lucide         = "fonticons/Lucide/lucide.ttf"
 	satoshiBlack   = "fonts/Satoshi_Complete/Satoshi-Black.ttf"
 	satoshiBold    = "fonts/Satoshi_Complete/Satoshi-Bold.ttf"
 	satoshiItalic  = "fonts/Satoshi_Complete/Satoshi-Italic.ttf"
@@ -33,7 +33,6 @@ const (
 )
 
 var (
-	//globalFontScale = float32(ebiten.Monitor().DeviceScaleFactor())
 	globalFontScale = float32(1)
 	pointSize       = 1
 	fontSizeH1      = 32 * (float32(pointSize) * globalFontScale)
@@ -55,7 +54,6 @@ var (
 	FontsInitialized bool
 )
 
-// Keep references to font data while building the atlas to prevent GC
 var fontDataKeep [][]byte
 
 func RebuildFonts(backend backend.Backend[glfwbackend.GLFWWindowFlags]) {
@@ -82,14 +80,8 @@ func RebuildFonts(backend backend.Backend[glfwbackend.GLFWWindowFlags]) {
 	FontIconsH4 = CreateFont(fontAtlas, lucide, fontSizeH4, true, false)
 	FontCode = CreateFont(fontAtlas, firaCodeRegular, fontSizeH4, false, false)
 
-	// Force font atlas to rebuild tex cache
-	//_, _, _, _ = fontAtlas.GetTextureDataAsRGBA32()
-
-	fontTextureImg, w, h, _ := fontAtlas.GetTextureDataAsRGBA32()
-	tex := backend.CreateTexture(fontTextureImg, int(w), int(h))
-
-	imgui.CurrentIO().Fonts().SetTexID(tex)
-	imgui.CurrentIO().Fonts().SetTexReady(true)
+	fontTextureImg := fontAtlas.TexData()
+	imgui.CurrentIO().Fonts().SetTexData(fontTextureImg)
 
 	// At this point the atlas/texture is ready; we can release our Go font data
 	fontDataKeep = nil
@@ -101,7 +93,6 @@ func CreateFont(atlas *imgui.FontAtlas, path string, size float32, addicons bool
 	data, err := resources.Assets.ReadFile(path)
 	util.PanicOnError(err)
 
-	// Keep a reference so the GC doesn't move/free it while ImGui reads it
 	fontDataKeep = append(fontDataKeep, data)
 
 	dataPtr := uintptr(unsafe.Pointer(utils.SliceToPtr(data)))
@@ -111,20 +102,16 @@ func CreateFont(atlas *imgui.FontAtlas, path string, size float32, addicons bool
 	if !addicons {
 		cfg := imgui.NewFontConfig()
 		ranges := atlas.GlyphRangesDefault()
-		// IMPORTANT: Do NOT let atlas free Go-owned memory
 		cfg.SetFontDataOwnedByAtlas(false)
 		font = atlas.AddFontFromMemoryTTFV(dataPtr, dataLen, size, cfg, ranges)
 	} else {
 		cfg := imgui.NewFontConfig()
-		cfg.SetMergeMode(true) // Merges icons into the previous font.
+		cfg.SetMergeMode(true)
 		cfg.SetGlyphOffset(imgui.Vec2{X: 0, Y: 3})
-		//cfg.SetRasterizerMultiply(2)
-		//cfg.SetGlyphMinAdvanceX(fontSizeH1) // Use to make icon monospaced
 		cfg.SetPixelSnapH(true)
 		cfg.SetOversampleH(2)
 		cfg.SetOversampleV(2)
 
-		// IMPORTANT: Do NOT let atlas free Go-owned memory
 		cfg.SetFontDataOwnedByAtlas(false)
 
 		ranges := imgui.NewGlyphRange()

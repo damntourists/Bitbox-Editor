@@ -2,11 +2,28 @@ package audio
 
 import (
 	"errors"
-	"math"
+	"fmt"
+	"io"
 	"os"
+	"sync"
+	"time"
 
+	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
+	"github.com/gopxl/beep/v2"
+	"github.com/gopxl/beep/v2/speaker"
+	beepWav "github.com/gopxl/beep/v2/wav"
 )
+
+var sampleRate = beep.SampleRate(44100)
+
+func init() {
+	err := speaker.Init(sampleRate, sampleRate.N(time.Second/10))
+	if err != nil {
+		panic(err)
+		return
+	}
+}
 
 type (
 	Downsample struct {
@@ -14,7 +31,12 @@ type (
 	}
 
 	WaveFile struct {
+		decoder *wav.Decoder
+		pcm     *audio.IntBuffer
+		file    *os.File
+
 		Path        string
+		Name        string
 		SampleRate  int
 		BitDepth    int
 		Channels    [][]int64
@@ -24,52 +46,173 @@ type (
 
 		Len int
 
-		Loading bool
-	}
+		loading bool
+		loaded  bool
+		playing bool
 
-	WavLoadResult struct {
-		Wav *WaveFile
-		Err error
+		streamer         beep.StreamSeeker
+		progressStreamer *progressStreamer
+		format           beep.Format
+
+		bgOnce sync.Once
+		mu     sync.Mutex
 	}
 )
 
-// LoadWavAsync starts decoding in the background
-func LoadWavAsync(path string) <-chan WavLoadResult {
-	ch := make(chan WavLoadResult, 1)
-	go func() {
-		wf, err := LoadWAVFile(path)
-		ch <- WavLoadResult{Wav: wf, Err: err}
-		close(ch)
-	}()
-	return ch
+func (w *WaveFile) IsLoading() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.loading
 }
 
-// LoadWAVFile decodes a WAV file into raw
-func LoadWAVFile(path string) (*WaveFile, error) {
-	f, err := os.Open(path)
+func (w *WaveFile) IsLoaded() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.loaded
+}
+
+func (w *WaveFile) IsPlaying() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.playing
+}
+
+func (w *WaveFile) Progress() float64 {
+	if w.progressStreamer == nil {
+		return 0.0
+	}
+	return w.progressStreamer.Progress()
+}
+
+func (w *WaveFile) Position() int {
+	if w.progressStreamer == nil {
+		return 0
+	}
+	return w.progressStreamer.Position()
+}
+
+func (w *WaveFile) PositionSeconds() float64 {
+	if w.SampleRate == 0 {
+		return 0.0
+	}
+	return float64(w.Position()) / float64(w.SampleRate)
+}
+
+func (w *WaveFile) setPlaying(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.playing = v
+}
+
+func (w *WaveFile) SetLoading(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.loading = v
+}
+
+func (w *WaveFile) Play() {
+	log.Debug(fmt.Sprintf("Playing %s", w.Path))
+
+	if w.progressStreamer == nil {
+		log.Error("No progress streamer")
+		return
+	}
+
+	err := w.progressStreamer.Seek(0)
 	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	dec := wav.NewDecoder(f)
-	if !dec.IsValidFile() {
-		return nil, errors.New("invalid wav file")
+		log.Error(err.Error())
+		return
 	}
 
-	intBuf, err := dec.FullPCMBuffer()
+	w.setPlaying(true)
+
+	// Resample to 44100
+	resampler := beep.Resample(4, w.format.SampleRate, sampleRate, w.progressStreamer)
+
+	speaker.Play(
+		beep.Seq(resampler, beep.Callback(func() {
+			log.Debug(fmt.Sprintf("Finished playing %s", w.Path))
+			w.setPlaying(false)
+			w.progressStreamer.Reset()
+		})),
+	)
+}
+
+func (w *WaveFile) Stop() {
+	if w.IsPlaying() {
+		log.Debug(fmt.Sprintf("Stopping %s", w.Path))
+		speaker.Clear()
+		w.setPlaying(false)
+		if w.progressStreamer != nil {
+			w.progressStreamer.Reset()
+		}
+	}
+}
+
+func (w *WaveFile) Close() error {
+	if w.file != nil {
+		return w.file.Close()
+	}
+	return nil
+}
+
+func (w *WaveFile) Load() error {
+	if w.loading || w.loaded {
+		return nil
+	}
+
+	w.SetLoading(true)
+	defer w.SetLoading(false)
+
+	f, err := os.Open(w.Path)
 	if err != nil {
-		return nil, err
-	}
-	if intBuf == nil || intBuf.Data == nil || intBuf.Format == nil {
-		return nil, errors.New("empty PCM buffer")
+		return err
 	}
 
-	ch := intBuf.Format.NumChannels
-	sr := intBuf.Format.SampleRate
-	n := len(intBuf.Data) / ch
+	if w.streamer == nil {
+		w.streamer, w.format, err = beepWav.Decode(f)
+
+		if err != nil {
+			return err
+		}
+
+		totalSamples := w.streamer.Len()
+
+		w.progressStreamer = &progressStreamer{
+			StreamSeeker: w.streamer,
+			totalSamples: totalSamples,
+			position:     0,
+			progress:     0,
+		}
+
+		w.file = f
+	}
+
+	f.Seek(0, io.SeekStart)
+
+	if w.decoder == nil {
+		w.decoder = wav.NewDecoder(f)
+		if !w.decoder.IsValidFile() {
+			return errors.New("invalid wav file")
+		}
+	}
+
+	if w.pcm == nil {
+		w.pcm, err = w.decoder.FullPCMBuffer()
+		if err != nil {
+			return err
+		}
+	}
+
+	if w.pcm == nil || w.pcm.Data == nil || w.pcm.Format == nil {
+		return errors.New("empty PCM buffer")
+	}
+
+	ch := w.pcm.Format.NumChannels
+	sr := w.pcm.Format.SampleRate
+	n := len(w.pcm.Data) / ch
 	if n == 0 {
-		return nil, errors.New("no frames")
+		return errors.New("no frames")
 	}
 
 	chans := make([][]int64, ch)
@@ -78,11 +221,10 @@ func LoadWAVFile(path string) (*WaveFile, error) {
 		chans[c] = make([]int64, n)
 	}
 
-	// Deinterleave into int64
 	for i := 0; i < n; i++ {
 		base := i * ch
 		for c := 0; c < ch; c++ {
-			chans[c][i] = int64(intBuf.Data[base+c])
+			chans[c][i] = int64(w.pcm.Data[base+c])
 		}
 	}
 
@@ -96,7 +238,7 @@ func LoadWAVFile(path string) (*WaveFile, error) {
 	for c := 0; c < len(chans); c++ {
 		ys := chans[c]
 
-		mins, maxs := downsampleMinMaxInt64(ys, 2000)
+		mins, maxs := DownsampleMinMaxInt64(ys, 2000)
 		downsamples[c] = Downsample{Mins: mins, Maxs: maxs}
 		for _, v := range ys {
 			if !set {
@@ -112,51 +254,25 @@ func LoadWAVFile(path string) (*WaveFile, error) {
 		}
 	}
 
-	return &WaveFile{
-		Path:        path,
-		SampleRate:  sr,
-		BitDepth:    int(dec.BitDepth),
-		Channels:    chans,
-		Downsamples: downsamples,
-		Len:         n,
-		MinY:        minY,
-		MaxY:        maxY,
-	}, nil
+	w.SampleRate = sr
+	w.BitDepth = int(w.decoder.BitDepth)
+	w.Channels = chans
+	w.Downsamples = downsamples
+	w.Len = n
+	w.MinY = minY
+	w.MaxY = maxY
+
+	w.loaded = true
+
+	return nil
 }
 
-// downsampleMinMaxInt64 creates min/max envelopes per bin
-func downsampleMinMaxInt64(y []int64, bins int) (mins, maxs []int64) {
-	if bins <= 0 || len(y) == 0 {
-		return nil, nil
+func NewWaveFileLazy(name, path string) *WaveFile {
+	w := &WaveFile{
+		Name:    name,
+		Path:    path,
+		loaded:  false,
+		loading: false,
 	}
-	if bins >= len(y) {
-		mins = append([]int64(nil), y...)
-		maxs = append([]int64(nil), y...)
-		return
-	}
-	mins = make([]int64, bins)
-	maxs = make([]int64, bins)
-	binSize := float64(len(y)) / float64(bins)
-	for i := 0; i < bins; i++ {
-		start := int(math.Floor(float64(i) * binSize))
-		end := int(math.Floor(float64(i+1) * binSize))
-		if end <= start {
-			end = start + 1
-			if end > len(y) {
-				end = len(y)
-			}
-		}
-		minv, maxv := y[start], y[start]
-		for j := start + 1; j < end; j++ {
-			if y[j] < minv {
-				minv = y[j]
-			}
-			if y[j] > maxv {
-				maxv = y[j]
-			}
-		}
-		mins[i] = minv
-		maxs[i] = maxv
-	}
-	return
+	return w
 }

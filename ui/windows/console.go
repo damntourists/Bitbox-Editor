@@ -30,11 +30,11 @@ func (w *ConsoleWindow) onLogEvent(ctx context.Context, e events.LogRecord) {
 	sort.Slice(logs, func(i, j int) bool {
 		timeI, errI := time.Parse(time.RFC3339, logs[i].Timestamp)
 		if errI != nil {
-			return false // Handle invalid timestamp formats gracefully
+			return false
 		}
 		timeJ, errJ := time.Parse(time.RFC3339, logs[j].Timestamp)
 		if errJ != nil {
-			return true // Handle invalid timestamp formats gracefully
+			return true
 		}
 		return timeI.Before(timeJ)
 	})
@@ -43,8 +43,8 @@ func (w *ConsoleWindow) onLogEvent(ctx context.Context, e events.LogRecord) {
 func (w *ConsoleWindow) Menu() {}
 
 func (w *ConsoleWindow) Style() func() {
-	imgui.PushStyleColorVec4(imgui.ColWindowBg, theme.GetCurrentTheme().Style.Colors.ChildBg.Vec4)
-	imgui.PushStyleColorVec4(imgui.ColChildBg, theme.GetCurrentTheme().Style.Colors.ChildBg.Vec4)
+	imgui.PushStyleColorVec4(imgui.ColWindowBg, theme.GetCurrentTheme().Style.Colors.ScrollbarBg.Vec4)
+	imgui.PushStyleColorVec4(imgui.ColChildBg, theme.GetCurrentTheme().Style.Colors.ScrollbarBg.Vec4)
 	imgui.PushStyleVarVec2(imgui.StyleVarWindowPadding, imgui.Vec2{X: 2, Y: 2})
 
 	return func() {
@@ -76,7 +76,7 @@ func (w *ConsoleWindow) Layout() {
 					imgui.ColorU32Vec4(theme.GetCurrentTheme().Style.Colors.ChildBg.Vec4),
 					-1,
 				)
-				imgui.PushFont(fonts.FontCode)
+				imgui.PushFont(fonts.FontCode, 12)
 				imgui.TableNextColumn()
 				imgui.Text(log.Level)
 				imgui.TableNextColumn()
@@ -100,8 +100,6 @@ func (w *ConsoleWindow) Layout() {
 			w.scrollToBottom = false
 		}
 
-		// TODO: Only stick to bottom if scrolled to bottom.
-		//imgui.SetScrollYFloat(imgui.ScrollMaxY())
 		imgui.EndTable()
 
 	}
@@ -109,7 +107,7 @@ func (w *ConsoleWindow) Layout() {
 
 func NewConsoleWindow() *ConsoleWindow {
 	w := &ConsoleWindow{
-		Window:  NewWindow("Console", "SquareTerminal", NewWindowConfig()),
+		Window:  NewWindow("Console", "SquareTerminal").SetFlags(imgui.WindowFlagsMenuBar),
 		tableId: "console",
 		tableFlags: imgui.TableFlagsResizable |
 			imgui.TableFlagsNoBordersInBodyUntilResize |

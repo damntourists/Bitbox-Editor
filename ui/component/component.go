@@ -13,13 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// Auto is used to widget.SetSize to indicate height or width to occupy available spaces.
-	Auto float32 = -1
-)
-
 var log *zap.Logger
-var ComponentRegistry = make(map[imgui.ID]*Component)
 
 func init() {
 	log = logging.NewLogger("cmp")
@@ -29,7 +23,6 @@ type ComponentType interface {
 	Layout()
 }
 
-// Component - Base Backend component
 type Component struct {
 	id imgui.ID
 
@@ -38,9 +31,13 @@ type Component struct {
 
 	data interface{}
 
-	MouseEvents signals.Signal[events.MouseEventRecord]
+	mouseEvents signals.Signal[events.MouseEventRecord]
 
 	layoutBuilder types.ComponentLayoutBuilder
+}
+
+func (c *Component) MouseEvents() signals.Signal[events.MouseEventRecord] {
+	return c.mouseEvents
 }
 
 func (c *Component) SetData(data interface{}) *Component {
@@ -56,14 +53,6 @@ func (c *Component) SetLayoutBuilder(layoutBuilder types.ComponentLayoutBuilder)
 func (c *Component) Data() interface{} {
 	return c.data
 }
-
-//func (c *Component) Build() {
-//	if c.layoutBuilder != nil {
-//		c.layoutBuilder.Layout()
-//	} else {
-//		c.Layout()
-//	}
-//}
 
 func (c *Component) ID() imgui.ID {
 	return c.id
@@ -135,10 +124,10 @@ func (c *Component) handleMouseEvents() {
 	for _, bt := range buttonTypes {
 		if imgui.IsItemClickedV(bt) {
 			button = events.MouseButton(bt)
-			buttonSet = true // Mark button as set
+			buttonSet = true
 
 			click = events.Clicked
-			clickSet = true // Mark click as set
+			clickSet = true
 
 			if imgui.IsMouseDoubleClicked(bt) {
 				click = events.DoubleClicked
@@ -159,20 +148,16 @@ func (c *Component) handleMouseEvents() {
 		}
 
 		// Emit the event because it's different
-		c.MouseEvents.Emit(context.Background(), event)
+		c.mouseEvents.Emit(context.Background(), event)
 	}
 }
 
 func NewComponent(id imgui.ID) *Component {
-	if _, ok := ComponentRegistry[id]; !ok {
-		ComponentRegistry[id] = &Component{
-			id:            id,
-			state:         state.ItemStateNone,
-			previousState: state.ItemStateNone,
-			data:          nil,
-			MouseEvents:   signals.New[events.MouseEventRecord](),
-		}
+	return &Component{
+		id:            id,
+		state:         state.ItemStateNone,
+		previousState: state.ItemStateNone,
+		data:          nil,
+		mouseEvents:   signals.New[events.MouseEventRecord](),
 	}
-
-	return ComponentRegistry[id]
 }

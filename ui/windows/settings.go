@@ -46,7 +46,7 @@ func (w *SettingsWindow) Layout() {
 
 func NewSettingsWindow() *SettingsWindow {
 	sw := &SettingsWindow{
-		Window: NewWindow("Settings", "Cog", NewWindowConfig()),
+		Window: NewWindow("Settings", "Cog"),
 	}
 	sw.Window.layoutBuilder = sw
 	return sw

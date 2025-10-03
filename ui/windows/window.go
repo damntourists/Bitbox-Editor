@@ -12,8 +12,6 @@ import (
 )
 
 type (
-
-	// Window represents a customizable Backend windows
 	Window struct {
 		open      bool
 		title     string
@@ -24,7 +22,7 @@ type (
 
 		WindowEvents signals.Signal[events.WindowEventRecord]
 
-		config *WindowConfig
+		flags imgui.WindowFlags
 
 		layoutBuilder types.WindowLayoutBuilder
 
@@ -32,8 +30,14 @@ type (
 	}
 )
 
-func (w *Window) Title() string { return fmt.Sprintf("%s %s", fonts.Icon(w.icon), w.title) }
-func (w *Window) Icon() string  { return w.icon }
+func (w *Window) Flags() imgui.WindowFlags { return w.flags }
+func (w *Window) SetFlags(flags imgui.WindowFlags) *Window {
+	w.flags = flags
+	return w
+}
+
+func (w *Window) Title() string { return fmt.Sprintf("%s %s", w.Icon(), w.title) }
+func (w *Window) Icon() string  { return fonts.Icon(w.icon) }
 func (w *Window) Close() {
 	w.open = false
 	w.WindowEvents.Emit(context.Background(), events.WindowEventRecord{
@@ -41,6 +45,22 @@ func (w *Window) Close() {
 		WindowTitle: w.Title(),
 	})
 }
+func (w *Window) SetLayoutBuilder(layout types.WindowLayoutBuilder) *Window {
+	w.layoutBuilder = layout
+	return w
+}
+
+func (w *Window) Destroy() {
+	if w.open {
+		w.Close()
+	}
+	w.WindowEvents.Emit(context.Background(), events.WindowEventRecord{
+		Type:        events.WindowDestroy,
+		WindowTitle: w.Title(),
+	})
+	w.WindowEvents.Reset()
+}
+
 func (w *Window) Open() {
 	w.open = true
 	w.WindowEvents.Emit(context.Background(), events.WindowEventRecord{
@@ -69,15 +89,13 @@ func (w *Window) Build() {
 	}
 	defer styleFin()
 
-	if imgui.BeginV(w.Title(), &w.open, w.config.Combined()) {
-		// Run layout builder's Menu function
+	if imgui.BeginV(w.Title(), &w.open, w.flags) {
 		if w.layoutBuilder != nil {
 			w.layoutBuilder.Menu()
 		} else {
 			w.Menu()
 		}
 
-		// Run layout builder's Layout function
 		if w.layoutBuilder != nil {
 			w.layoutBuilder.Layout()
 		} else {
@@ -86,6 +104,13 @@ func (w *Window) Build() {
 
 	}
 	imgui.End()
+
+	if !w.open {
+		w.WindowEvents.Emit(context.Background(), events.WindowEventRecord{
+			Type:        events.WindowClose,
+			WindowTitle: w.Title(),
+		})
+	}
 }
 
 func (w *Window) Menu() {}
@@ -93,19 +118,19 @@ func (w *Window) Layout() {
 	panic("Layout not implemented. Please check that layoutBuilder is set.")
 }
 
-// NewWindow creates a new Window instance with the provided title and icon
-func NewWindow(title, icon string, config *WindowConfig) *Window {
-	if config == nil {
-		config = NewWindowConfig()
-	}
+func NewWindow(title, icon string) *Window {
+	//if config == nil {
+	//	config = NewWindowConfig()
+	//}
 
 	return &Window{
-		noClose:      false,
-		collapsed:    false,
-		open:         true,
-		title:        title,
-		icon:         icon,
-		config:       config,
+		noClose:   false,
+		collapsed: false,
+		open:      true,
+		title:     title,
+		icon:      icon,
+		//config:       config,
+		flags:        imgui.WindowFlagsNone,
 		WindowEvents: signals.New[events.WindowEventRecord](),
 	}
 }

@@ -14,15 +14,17 @@ type TextComponent struct {
 }
 
 func Text(text string) *TextComponent {
+	c := NewComponent(imgui.IDStr(text))
+
 	cmp := &TextComponent{
-		Component:  NewComponent(imgui.IDStr(text)),
+		Component:  c,
 		text:       text,
 		wrapped:    false,
 		selectable: false,
 		selected:   false,
 	}
 
-	//cmp.Component.layoutBuilder = cmp
+	cmp.Component.layoutBuilder = cmp
 	return cmp
 }
 
@@ -57,7 +59,7 @@ func (tc *TextComponent) Layout() {
 	}
 
 	if tc.font != nil {
-		imgui.PushFont(tc.font)
+		imgui.PushFont(tc.font, 1.0)
 		defer imgui.PopFont()
 	}
 
@@ -68,8 +70,9 @@ func (tc *TextComponent) Layout() {
 				imgui.SelectableFlagsAllowDoubleClick
 		}
 		imgui.SelectableBoolV(tc.text, tc.selected, flags, imgui.Vec2{})
-		tc.handleMouseEvents()
 	} else {
 		imgui.TextUnformatted(tc.text)
 	}
+
+	tc.handleMouseEvents()
 }

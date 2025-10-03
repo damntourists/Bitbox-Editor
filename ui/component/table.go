@@ -26,11 +26,6 @@ type TableComponent struct {
 	noHeader     bool
 }
 
-//func (t *TableComponent) ID(id ID) *TableComponent {
-//	t.id = id
-//	return t
-//}
-
 func (t *TableComponent) FastMode(b bool) *TableComponent {
 	t.fastMode = b
 	return t
@@ -78,7 +73,6 @@ func (t *TableComponent) colCount() int {
 		if len(t.rows) > 0 {
 			return len(t.rows[0].layout)
 		}
-		// no rows or columns, pass single column to begintable
 		return 1
 	}
 	return colCount
@@ -87,8 +81,7 @@ func (t *TableComponent) colCount() int {
 func (t *TableComponent) handleSort() {
 	if specs := imgui.TableGetSortSpecs(); specs != nil {
 		if specs.SpecsDirty() {
-			// Evil bithack - we assume that array==pointer, so specs.Specs() points to the first element of that array.
-			cs := specs.Specs() // this in fact is []TableColumnSortSpecs but should be also (*TableColumnSortSpecs)
+			cs := specs.Specs()
 			colIdx := cs.ColumnIndex()
 			sortDir := cs.SortDirection()
 
@@ -145,7 +138,7 @@ func (t *TableComponent) Layout() {
 	}
 }
 
-func Table(id imgui.ID) *TableComponent {
+func NewTableComponent(id imgui.ID) *TableComponent {
 	tc := &TableComponent{
 		Component: NewComponent(id),
 		flags: imgui.TableFlagsResizable |
@@ -160,6 +153,6 @@ func Table(id imgui.ID) *TableComponent {
 		freezeColumn: -1,
 		noHeader:     false,
 	}
-	//tc.Component.layoutBuilder = tc
+	tc.Component.layoutBuilder = tc
 	return tc
 }
