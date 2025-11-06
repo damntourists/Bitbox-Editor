@@ -1,2 +1,6 @@
-**/*.ttf
-build/
+/resources/**/*.ttf
+/resources/*.ttf
+/build/
+*.als
+*.xml
+/internal/parsing/ExamplePresets/

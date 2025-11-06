@@ -2,6 +2,7 @@
   <configuration default="false" name="go build" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="Bitbox-Editor" />
     <working_directory value="$PROJECT_DIR$" />
+    <go_parameters value="-tags freetype2" />
     <kind value="PACKAGE" />
     <package value="bitbox-editor/cmd/bbe" />
     <directory value="$PROJECT_DIR$" />

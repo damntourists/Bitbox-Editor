@@ -1,15 +1,19 @@
 package main
 
 import (
-	_ "bitbox-editor/lib/config"
-	_ "bitbox-editor/lib/system"
-
-	"bitbox-editor/ui"
+	"bitbox-editor/internal/app"
+	"runtime"
 
 	_ "github.com/silbinarywolf/preferdiscretegpu"
 )
 
+func init() {
+	runtime.LockOSThread()
+}
+
+// Main entrypoint for the BitBox Editor.
 func main() {
-	editor := ui.NewBitboxEditor()
+
+	editor := app.NewBitboxEditor()
 	editor.Run()
 }
