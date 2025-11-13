@@ -12,7 +12,11 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 )
 
+// TODO: Finish documentation
+
 const DefaultColorFadeDuration = 350 * time.Millisecond
+
+var DefaultEasingFunction = EaseOutQuad
 
 // EasingFunc is a function that takes a normalized time value (0.0 to 1.0)
 // and returns an eased value (typically 0.0 to 1.0)
