@@ -94,11 +94,10 @@ func (c *PadGridComponent) drainEvents() {
 	for {
 		select {
 		case event := <-c.eventSub:
-			var cmd UpdateCmd
+			var cmd component.UpdateCmd
 			switch event.Type() {
 			case events.ComponentClickEventKey:
-				// It's a click event. Post a local command.
-				cmd = UpdateCmd{Type: cmdHandlePadClick, Data: event}
+				cmd = component.UpdateCmd{Type: cmdHandlePadClick, Data: event}
 			}
 
 			if cmd.Type != 0 {

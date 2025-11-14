@@ -106,7 +106,7 @@ func init() {
 	// Watch config file for changes and automatically reload
 	viper.WatchConfig()
 	viper.OnConfigChange(func(e fsnotify.Event) {
-		log.Info("Config file changed, reloading...", zap.String("file", e.Name))
+		log.Debug("Config file changed, reloading...", zap.String("file", e.Name))
 	})
 }
 
@@ -179,9 +179,9 @@ func setDefaults() {
 }
 
 /*
-╭───────╮
-│ Theme │
-╰───────╯
+╭──────────────╮
+│ Theme Config │
+╰──────────────╯
 */
 
 // SetTheme updates the theme in the config and saves it
@@ -223,9 +223,9 @@ func GetColormap() string {
 }
 
 /*
-╭─────────╮
-│ Console │
-╰─────────╯
+╭────────────────╮
+│ Console Config │
+╰────────────────╯
 */
 
 // SetConsoleMaxLines updates the console max lines in the config and saves it
@@ -250,9 +250,9 @@ func GetConsoleMaxLines() int {
 }
 
 /*
-╭─────────╮
-│ Toolbar │
-╰─────────╯
+╭────────────────╮
+│ Toolbar Config │
+╰────────────────╯
 */
 
 // SetToolbarPlacement updates the toolbar placement in config

@@ -2,7 +2,7 @@ package app
 
 import (
 	"bitbox-editor/internal/app/component/button"
-	"bitbox-editor/internal/app/component/cube"
+	"bitbox-editor/internal/app/component/canvas"
 	"bitbox-editor/internal/app/component/spectrum"
 	"bitbox-editor/internal/app/component/volume"
 	"bitbox-editor/internal/app/eventbus"
@@ -43,7 +43,7 @@ func init() {
 // BitboxEditor holds the main application state
 type BitboxEditor struct {
 	dockspaceID imgui.ID
-	uuid        string // Unique ID for the app to use as a subscriber
+	uuid        string
 
 	Window struct {
 		Settings *settings.SettingsWindow
@@ -65,7 +65,7 @@ type BitboxEditor struct {
 	consoleButton *button.Button
 	libraryButton *button.Button
 
-	canvas *cube.CubeComponent
+	canvas *canvas.RenderPrimitive
 
 	colormap implot.Colormap
 
@@ -75,7 +75,24 @@ type BitboxEditor struct {
 
 	updates  chan UpdateCmd
 	handler  UpdateHandlerFunc
-	eventSub chan events.Event // Private "mailbox" for bus events
+	eventSub chan events.Event
+}
+
+func NewBitboxEditor() *BitboxEditor {
+	app := &BitboxEditor{
+		uuid:        uuid.NewString(),
+		initialized: false,
+		updates:     make(chan UpdateCmd, 50),
+		eventSub:    make(chan events.Event, 100),
+	}
+	app.handler = app.handleUpdate
+	app.setup()
+
+	font.InitAndRebuildFonts(app.backend)
+	font.SetGlobalScale(1)
+	//font.RebuildFonts()
+
+	return app
 }
 
 // drainEvents translates global bus events into local commands
@@ -95,10 +112,9 @@ func (b *BitboxEditor) drainEvents() {
 
 // handleUpdate is the main command processor for the app
 func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
-	// 1. Use a type switch to handle different command/event types
 	switch c := cmd.Type.(type) {
+
 	case localCommand:
-		// 2. Handle our own private commands
 		switch c {
 		case cmdEditorCreate:
 			if payload, ok := cmd.Data.(editorCreatePayload); ok && payload.Preset != nil {
@@ -112,13 +128,11 @@ func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
 				audioMgr := audio.GetAudioManager()
 				editWindow := presetedit.NewPresetEditWindow(p, audioMgr)
 				b.Window.Editors = append(b.Window.Editors, editWindow)
-				log.Debug("Added presetedit window", zap.String("title", editWindow.Title()))
 			}
 
 		case cmdEditorAdd:
 			if payload, ok := cmd.Data.(editorAddPayload); ok && payload.Editor != nil {
 				b.Window.Editors = append(b.Window.Editors, payload.Editor)
-				log.Debug("Added presetedit window", zap.String("title", payload.Editor.Title()))
 			}
 
 		case cmdEditorRemove:
@@ -135,47 +149,40 @@ func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
 				}
 				if removed {
 					b.Window.Editors = newEditors
-					log.Debug("Removed presetedit window", zap.String("title", payload.Editor.Title()))
 				}
 			}
 		}
-		return // Handled local command
-
-	// --- 3. Handle Events from the Bus ---
+		return
 
 	case events.PresetEventRecord:
 		if c.EventType == events.PresetLoadEvent {
 			if p, ok := c.Data.(*preset.Preset); ok && p != nil {
 				log.Debug("App received LoadPreset event, creating editor", zap.String("preset", p.Name))
-				// Send a *local command* to ourself to do the work
 				b.SendUpdate(UpdateCmd{
 					Type: cmdEditorCreate,
 					Data: editorCreatePayload{Preset: p},
 				})
 			}
 		}
-		return // Handled event
+		return
 
 	case events.StorageEventRecord:
 		if c.EventType == events.StorageActivatedEvent {
 			if loc, ok := c.Data.(*storage.StorageLocation); ok {
 				log.Debug("App received StorageActivated event", zap.String("path", loc.Path))
-				// Tell the other windows to update (their setters are thread-safe)
 				b.Window.Presets.SetPresetLocation(loc)
 				b.Window.Library.SetStorageLocation(loc)
 			}
 		}
-		return // Handled event
+		return
 
 	case events.AudioVolumeEventRecord:
 		if b.volumeControl != nil {
-			// SetVolume is thread-safe
 			b.volumeControl.SetVolume(float32(c.Volume))
 		}
-		return // Handled event
+		return
 
 	case events.WindowEventRecord:
-		// Handle window close/destroy events
 		if c.EventType == events.WindowCloseEvent || c.EventType == events.WindowDestroyEvent {
 			var editorToRemove *presetedit.PresetEditWindow
 			for _, editor := range b.Window.Editors {
@@ -185,14 +192,13 @@ func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
 				}
 			}
 			if editorToRemove != nil {
-				// Send a *local command* to remove it
 				b.SendUpdate(UpdateCmd{
 					Type: cmdEditorRemove,
 					Data: editorRemovePayload{Editor: editorToRemove},
 				})
 			}
 		}
-		return // Handled event
+		return
 
 	default:
 		log.Warn("BitboxEditor unhandled update type", zap.Any("type", fmt.Sprintf("%T", cmd.Type)))
@@ -214,8 +220,13 @@ func (b *BitboxEditor) afterRender() {}
 func (b *BitboxEditor) setup() {
 	var icons []image.Image
 	iconNames := []string{
-		"icon16.png", "icon24.png", "icon32.png",
-		"icon64.png", "icon128.png", "icon256.png", "icon512.png",
+		"icon16.png",
+		"icon24.png",
+		"icon32.png",
+		"icon64.png",
+		"icon128.png",
+		"icon256.png",
+		"icon512.png",
 	}
 
 	for _, iconName := range iconNames {
@@ -238,9 +249,6 @@ func (b *BitboxEditor) setup() {
 	b.backend.SetAfterCreateContextHook(b.afterCreateContext)
 	b.backend.SetBeforeDestroyContextHook(b.beforeDestroyContext)
 
-	// Set initial background color from current theme
-	currentTheme := theme.GetCurrentTheme()
-	b.backend.SetBgColor(currentTheme.Style.Colors.ChildBg.Vec4)
 	b.backend.CreateWindow("Bitbox Editor v0.0.0", 1400, 1000)
 	b.backend.SetIcons(icons...)
 
@@ -254,9 +262,15 @@ func (b *BitboxEditor) setup() {
 
 func (b *BitboxEditor) initWindows() {
 
-	b.canvas = cube.NewCube(imgui.IDStr(fmt.Sprintf("##canvas:%s", b.uuid)))
+	b.canvas = canvas.NewRenderPrimitive(
+		imgui.IDStr(fmt.Sprintf("##canvas:%s", b.uuid)),
+		"sphere",
+	)
 
 	audioMgr := audio.GetAudioManager()
+	// TODO: Finish building out midi manager.
+	//midiMgr := midi.GetMidiManager()
+	//log.Info("midi ports:", zap.Any("ports", midiMgr.ListPorts()))
 
 	b.Window.Settings = settings.NewSettingsWindow()
 	b.Window.Console = console.NewConsoleWindow()
@@ -267,57 +281,55 @@ func (b *BitboxEditor) initWindows() {
 	b.Window.Editors = make([]*presetedit.PresetEditWindow, 0)
 
 	toolbarSize := config.GetToolbarSize()
+
 	b.spectrumAnalyzer = spectrum.NewSpectrumAnalyzer(imgui.IDStr("toolbar_spectrum"), audioMgr).
 		SetHeight(toolbarSize - 16).
 		SetPadding(2)
+
 	b.volumeControl = volume.NewVolumeControlWithID(imgui.IDStr("toolbar_volume")).
 		SetWidth(120).
 		SetHeight(8).
 		SetRadius(4).
-		SetShowLabel(false).
-		SetShowPercent(false).
 		SetVolume(float32(audioMgr.GetVolume()))
 
-	// Initialize toolbar buttons with icons scaled to toolbar size
-	buttonSize := toolbarSize - 8 // Leave some padding for top/bottom
+	buttonSize := toolbarSize - 8 // 8 pixels padding
+
 	b.storageButton = button.NewButtonWithID(imgui.IDStr("toolbar_storage"), b.Window.Storage.Icon()).
 		SetFixedSize(buttonSize, buttonSize).
 		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
 		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
 		SetToggledColor(theme.GetCurrentTheme().Style.Colors.TabHovered.Vec4).
 		SetOnClick(func() { b.Window.Storage.ToggleOpen() })
+
 	b.presetsButton = button.NewButtonWithID(imgui.IDStr("toolbar_presets"), b.Window.Presets.Icon()).
 		SetFixedSize(buttonSize, buttonSize).
 		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
 		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
 		SetOnClick(func() { b.Window.Presets.ToggleOpen() })
+
 	b.consoleButton = button.NewButtonWithID(imgui.IDStr("toolbar_console"), b.Window.Console.Icon()).
 		SetFixedSize(buttonSize, buttonSize).
 		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
 		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
 		SetOnClick(func() { b.Window.Console.ToggleOpen() })
+
 	b.libraryButton = button.NewButtonWithID(imgui.IDStr("toolbar_library"), b.Window.Library.Icon()).
 		SetFixedSize(buttonSize, buttonSize).
 		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
 		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
 		SetOnClick(func() { b.Window.Library.ToggleOpen() })
 
-	// Hook up volume control to audio manager
 	b.volumeControl.SetOnVolumeChange(func(volume float32) {
 		audioMgr.SetVolume(float64(volume))
 	})
 
-	// --- Subscribe to Events ---
-	bus := eventbus.Bus
-	uuid := b.uuid // Use the app's UUID
-	bus.Subscribe(events.AudioVolumeChangedKey, uuid, b.eventSub)
-	bus.Subscribe(events.StorageActivatedEventKey, uuid, b.eventSub)
-	bus.Subscribe(events.PresetLoadEventKey, uuid, b.eventSub)
-	bus.Subscribe(events.WindowCloseEventKey, uuid, b.eventSub)
-	bus.Subscribe(events.WindowDestroyEventKey, uuid, b.eventSub)
+	eventbus.Bus.Subscribe(events.AudioVolumeChangedKey, b.uuid, b.eventSub)
+	eventbus.Bus.Subscribe(events.StorageActivatedEventKey, b.uuid, b.eventSub)
+	eventbus.Bus.Subscribe(events.PresetLoadEventKey, b.uuid, b.eventSub)
+	eventbus.Bus.Subscribe(events.WindowCloseEventKey, b.uuid, b.eventSub)
+	eventbus.Bus.Subscribe(events.WindowDestroyEventKey, b.uuid, b.eventSub)
 }
 
-// menu configures the main menu for the application
 func (b *BitboxEditor) menu() {
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
@@ -362,12 +374,10 @@ func (b *BitboxEditor) close() {
 	b.backend.SetShouldClose(true)
 }
 
-// onDrop event handler for external drag/drops
 func (b *BitboxEditor) onDrop(files []string) {
 	fmt.Println("Dropped files: ", files)
 }
 
-// toolbar configures the main toolbar for the application
 func (b *BitboxEditor) toolbar() {
 	viewport := imgui.MainViewport()
 	viewportPos := viewport.Pos()
@@ -437,7 +447,6 @@ func (b *BitboxEditor) toolbar() {
 	imgui.SetNextWindowPos(toolbarPos)
 	imgui.SetNextWindowSize(toolbarWindowSize)
 
-	// Push window padding
 	imgui.PushStyleVarVec2(imgui.StyleVarWindowPadding, imgui.Vec2{X: 8, Y: 4})
 	defer imgui.PopStyleVar()
 
@@ -517,7 +526,6 @@ func (b *BitboxEditor) toolbar() {
 	}
 }
 
-// dockspace configures docking for the application
 func (b *BitboxEditor) dockspace() {
 	viewport := imgui.MainViewport()
 
@@ -598,10 +606,9 @@ func (b *BitboxEditor) dockspace() {
 	imgui.PopStyleVar()
 }
 
-// loop is the render loop for the application
 func (b *BitboxEditor) loop() {
-	b.drainEvents()    // <-- 1. Drain events
-	b.ProcessUpdates() // <-- 2. Process commands
+	b.drainEvents()
+	b.ProcessUpdates()
 
 	currentEditors := append([]*presetedit.PresetEditWindow(nil), b.Window.Editors...)
 
@@ -614,7 +621,6 @@ func (b *BitboxEditor) loop() {
 		b.initialized = true
 	}
 
-	// Always get the current theme (important for transitions)
 	currentTheme := theme.GetCurrentTheme()
 	themeFin := currentTheme.Apply()
 
@@ -623,7 +629,6 @@ func (b *BitboxEditor) loop() {
 	if b.canvas != nil {
 		b.canvas.Build()
 	}
-	// TODO: Add this to theme setting
 
 	defer themeFin()
 
@@ -657,7 +662,6 @@ func (b *BitboxEditor) loop() {
 
 }
 
-// SendUpdate is the public, thread-safe method for sending commands
 func (b *BitboxEditor) SendUpdate(cmd UpdateCmd) {
 	select {
 	case b.updates <- cmd:
@@ -677,7 +681,6 @@ func (b *BitboxEditor) ProcessUpdates() {
 		}
 	}
 
-	// Process updates
 	const maxMessagesPerFrame = 100
 	for i := 0; i < maxMessagesPerFrame; i++ {
 		select {
@@ -697,29 +700,10 @@ func (b *BitboxEditor) UpdateChannel() chan<- UpdateCmd {
 	return b.updates
 }
 
-// Run starts backend rendering of the application
 func (b *BitboxEditor) Run() {
 	if b.backend == nil {
 		panic("backend is nil: setup() did not initialize the backend")
 	}
 
 	b.backend.Run(b.loop)
-}
-
-// NewBitboxEditor Constructor that creates a new BitboxEditor instance
-func NewBitboxEditor() *BitboxEditor {
-	app := &BitboxEditor{
-		uuid:        uuid.NewString(), // <-- Add UUID
-		initialized: false,
-		updates:     make(chan UpdateCmd, 50),
-		eventSub:    make(chan events.Event, 100), // Create event mailbox
-	}
-	app.handler = app.handleUpdate
-	app.setup()
-
-	font.InitAndRebuildFonts(app.backend)
-	font.SetGlobalScale(1)
-	font.RebuildFonts()
-
-	return app
 }

@@ -71,7 +71,7 @@ func (c *PadConfigComponent) drainEvents() {
 		case event := <-c.eventSub:
 			// We only subscribe to PadGridSelectKey
 			if e, ok := event.(events.PadGridEventRecord); ok {
-				c.SendUpdate(UpdateCmd{Type: cmdSetPadConfigPad, Data: e.Pad})
+				c.SendUpdate(component.UpdateCmd{Type: cmdSetPadConfigPad, Data: e.Pad})
 			}
 		default:
 			// No more events
