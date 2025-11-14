@@ -2,7 +2,7 @@
 // from https://unpkg.com/lucide-static@latest/font/lucide.css
 // for use with https://unpkg.com/lucide-static@latest/font/lucide.ttf
 
-package fonts
+package font
 
 import (
 	IconFontCppHeaders "bitbox-editor/resources/fonticons"
@@ -10,7 +10,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type Font struct {
+type IconFont struct {
 	Filenames       [][2]string
 	Min, Max16, Max int
 	Icons           map[string]string

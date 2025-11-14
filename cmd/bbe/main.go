@@ -13,7 +13,6 @@ func init() {
 
 // Main entrypoint for the BitBox Editor.
 func main() {
-
 	editor := app.NewBitboxEditor()
 	editor.Run()
 }

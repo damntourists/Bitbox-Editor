@@ -1,7 +1,7 @@
 package file
 
 import (
-	"bitbox-editor/lib/logging"
+	"bitbox-editor/internal/logging"
 	"fmt"
 	"os"
 	"path/filepath"

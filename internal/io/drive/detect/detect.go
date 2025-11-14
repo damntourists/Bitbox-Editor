@@ -1,7 +1,7 @@
 package detect
 
 import (
-	"bitbox-editor/lib/logging"
+	"bitbox-editor/internal/logging"
 
 	"go.uber.org/zap"
 )

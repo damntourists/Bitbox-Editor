@@ -12,6 +12,21 @@ type FSTree struct {
 	pathMap map[string]*FSEntry
 }
 
+func NewFSTree(rootPath string) *FSTree {
+	root := &FSEntry{
+		Name:     filepath.Base(rootPath),
+		Path:     rootPath,
+		IsDir:    true,
+		Children: make([]*FSEntry, 0),
+		Parent:   nil,
+	}
+
+	return &FSTree{
+		Root:    root,
+		pathMap: make(map[string]*FSEntry),
+	}
+}
+
 func (t *FSTree) AddEntry(path string, isDir bool, size int64) *FSEntry {
 	path = filepath.Clean(path)
 
@@ -77,6 +92,15 @@ func (t *FSTree) ScanDirectory(rootPath string, extensions ...string) error {
 			return nil
 		}
 
+		// Skip hidden files and directories
+		name := info.Name()
+		if strings.HasPrefix(name, ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		if info.IsDir() {
 			t.AddEntry(path, true, 0)
 			return nil
@@ -126,7 +150,9 @@ func (t *FSTree) GetTotalSize() int64 {
 
 func (t *FSTree) Filter(predicate func(*FSEntry) bool) []*FSEntry {
 	results := make([]*FSEntry, 0)
-	t.filterRecursive(t.Root, predicate, &results)
+	for _, child := range t.Root.Children {
+		t.filterRecursive(child, predicate, &results)
+	}
 	return results
 }
 
@@ -149,7 +175,7 @@ func (t *FSTree) Search(query string) []*FSEntry {
 func (t *FSTree) SearchPath(query string) []*FSEntry {
 	query = strings.ToLower(query)
 	return t.Filter(func(entry *FSEntry) bool {
-		return strings.Contains(strings.ToLower(entry.Path), query)
+		return !entry.IsDir && strings.Contains(strings.ToLower(entry.Path), query)
 	})
 }
 
@@ -201,19 +227,4 @@ func (t *FSTree) GetLargestFiles(n int) []*FSEntry {
 		n = len(files)
 	}
 	return files[:n]
-}
-
-func NewFSTree(rootPath string) *FSTree {
-	root := &FSEntry{
-		Name:     filepath.Base(rootPath),
-		Path:     rootPath,
-		IsDir:    true,
-		Children: make([]*FSEntry, 0),
-		Parent:   nil,
-	}
-
-	return &FSTree{
-		Root:    root,
-		pathMap: make(map[string]*FSEntry),
-	}
 }

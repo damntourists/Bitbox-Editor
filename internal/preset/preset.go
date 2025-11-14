@@ -55,6 +55,11 @@ func (p *Preset) resolveWavFiles() {
 			continue
 		}
 
+		// Only process files with .wav extension
+		if !strings.EqualFold(filepath.Ext(cell.Filename), ".wav") {
+			continue
+		}
+
 		path, err := p.ResolveFile(cell.Filename)
 		if err != nil {
 			continue

@@ -10,7 +10,7 @@ import (
 
 type Document struct {
 	XMLName xml.Name `xml:"document"`
-	Session Session  `xml:"session"`
+	Session *Session `xml:"session"`
 }
 
 func (d *Document) ResolveWavFiles(baseDir string) ([]WavFile, error) {

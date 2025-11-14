@@ -42,6 +42,15 @@ func IsFile(path string) (bool, error) {
 }
 
 func FindByExt(root string, exts ...string) ([]string, error) {
+	// Verify root is a directory
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("root path is not a directory")
+	}
+
 	normalized := make(map[string]struct{}, len(exts))
 	for _, e := range exts {
 		if e == "" {
@@ -54,9 +63,9 @@ func FindByExt(root string, exts ...string) ([]string, error) {
 	}
 
 	matches := []string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 
 		if d.IsDir() {
