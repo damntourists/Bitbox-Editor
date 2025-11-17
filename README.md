@@ -19,7 +19,7 @@ Desktop editor for 1010Music Bitbox users.
 
 
 #### Waveform interaction 
-<video width="640" controls>
+<video width="640" controls poster="resources/poster01.jpg">
     <source src="https://bronson.zip/content/media/2025/11/2025-11-17-03-59-15.mp4" type="video/mp4">
 </video>
 
