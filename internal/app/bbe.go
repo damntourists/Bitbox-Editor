@@ -283,7 +283,7 @@ func (b *BitboxEditor) initWindows() {
 	toolbarSize := config.GetToolbarSize()
 
 	b.spectrumAnalyzer = spectrum.NewSpectrumAnalyzer(imgui.IDStr("toolbar_spectrum"), audioMgr).
-		SetHeight(toolbarSize - 16).
+		SetHeight(toolbarSize - 8).
 		SetPadding(2)
 
 	b.volumeControl = volume.NewVolumeControlWithID(imgui.IDStr("toolbar_volume")).
@@ -518,7 +518,7 @@ func (b *BitboxEditor) toolbar() {
 			imgui.EndGroup()
 			imgui.SameLine()
 
-			imgui.Dummy(imgui.Vec2{X: 32.0, Y: 1})
+			imgui.Dummy(imgui.Vec2{X: 16.0, Y: 1})
 			imgui.SameLine()
 
 			b.spectrumAnalyzer.Build()
