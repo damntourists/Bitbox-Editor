@@ -19,7 +19,7 @@ Desktop editor for 1010Music Bitbox users.
 
 
 #### Waveform interaction 
-![https://bronson.zip/content/media/2025/11/2025-11-17-03-59-15.mp4](https://bronson.zip/content/media/2025/11/2025-11-17-03-59-15.mp4)
+https://github.com/user-attachments/assets/fe41583c-b650-4d96-941c-4b052e99d99c
 
 
 #### Settings
