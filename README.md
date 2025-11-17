@@ -17,13 +17,10 @@ Desktop editor for 1010Music Bitbox users.
 #### Click a pad to begin editing. Playback starts automatically.
 ![Screenshot_20251117_034932.png](resources/Screenshot_20251117_034932.png)
 
-<figure class="video_container">
-  <video controls="true" allowfullscreen="true" poster="resources/poster01.jpg">
+
+<video controls>
     <source src="https://bronson.zip/content/media/2025/11/2025-11-17-03-59-15.mp4" type="video/mp4">
-  </video>
-</figure>
-
-
+</video>
 
 ![Screenshot_20251117_030230.png](resources/Screenshot_20251117_030230.png)
 ![Screenshot_20251117_030702.png](resources/Screenshot_20251117_030702.png)
