@@ -21,6 +21,10 @@ Desktop editor for 1010Music Bitbox users.
 #### Waveform interaction 
 https://github.com/user-attachments/assets/fe41583c-b650-4d96-941c-4b052e99d99c
 
+#### Theme & Colormap Settings
+https://github.com/user-attachments/assets/9039840b-b015-4c07-93fe-33946cb2262d
+
+https://github.com/user-attachments/assets/17dbba54-203e-40f1-ac23-645622163670
 
 #### Settings
 ![Screenshot_20251117_030230.png](resources/Screenshot_20251117_030230.png)
