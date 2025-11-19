@@ -67,7 +67,7 @@ type LibraryWindow struct {
 		Tree *tree.TreeComponent
 	}
 
-	eventSub chan events.Event
+	filteredEventSub *eventbus.FilteredSubscription
 }
 
 func (w *LibraryWindow) createTreeRowsFromData(data []tree.TreeRowData) []*tree.TreeRowComponent {
@@ -156,14 +156,16 @@ func (w *LibraryWindow) createInitialTopLevelRows(rowData []tree.TreeRowData) []
 
 // drainEvents translates global bus events into local commands
 func (w *LibraryWindow) drainEvents() {
-	for {
-		select {
-		case event := <-w.eventSub:
-			if e, ok := event.(events.LibraryScanEventRecord); ok {
-				w.SendUpdate(UpdateCmd{Type: cmdHandleScanEvent, Data: e})
+	if w.filteredEventSub != nil {
+		for {
+			select {
+			case event := <-w.filteredEventSub.Events():
+				if e, ok := event.(events.LibraryScanEventRecord); ok {
+					w.SendUpdate(UpdateCmd{Type: cmdHandleScanEvent, Data: e})
+				}
+			default:
+				return
 			}
-		default:
-			return
 		}
 	}
 }
@@ -547,13 +549,10 @@ func (w *LibraryWindow) Layout() {
 
 // Destroy cleans up the window and its subscriptions
 func (w *LibraryWindow) Destroy() {
-	// Unsubscribe from all events
-	bus := eventbus.Bus
-	uuid := w.UUID()
-	bus.Unsubscribe(events.LibraryScanStartedKey, uuid)
-	bus.Unsubscribe(events.LibraryScanProgressKey, uuid)
-	bus.Unsubscribe(events.LibraryScanCompletedKey, uuid)
-	bus.Unsubscribe(events.LibraryScanFailedKey, uuid)
+	// Unsubscribe from filtered subscriptions (handles all event types)
+	if w.filteredEventSub != nil {
+		w.filteredEventSub.Unsubscribe()
+	}
 
 	// Destroy child components
 	if w.Components.Tree != nil {
@@ -567,7 +566,6 @@ func (w *LibraryWindow) Destroy() {
 func NewLibraryWindow() *LibraryWindow {
 	w := &LibraryWindow{
 		isScanning: false,
-		eventSub:   make(chan events.Event, 50),
 	}
 	w.Window = window.NewWindow[*LibraryWindow]("Library", "LibraryBig", w.handleUpdate)
 
@@ -596,10 +594,16 @@ func NewLibraryWindow() *LibraryWindow {
 
 	bus := eventbus.Bus
 	uuid := w.UUID()
-	bus.Subscribe(events.LibraryScanStartedKey, uuid, w.eventSub)
-	bus.Subscribe(events.LibraryScanProgressKey, uuid, w.eventSub)
-	bus.Subscribe(events.LibraryScanCompletedKey, uuid, w.eventSub)
-	bus.Subscribe(events.LibraryScanFailedKey, uuid, w.eventSub)
+
+	// Create filtered subscription for library scan events
+	w.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 50)
+	w.filteredEventSub.SubscribeMultiple(
+		bus,
+		events.LibraryScanStartedKey,
+		events.LibraryScanProgressKey,
+		events.LibraryScanCompletedKey,
+		events.LibraryScanFailedKey,
+	)
 
 	return w
 }

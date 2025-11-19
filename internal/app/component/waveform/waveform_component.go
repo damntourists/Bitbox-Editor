@@ -45,8 +45,8 @@ type WaveComponent struct {
 	repeatMode     int
 	repeatSliceIdx int
 
-	emptyText string
-	eventSub  chan events.Event
+	emptyText        string
+	filteredEventSub *eventbus.FilteredSubscription
 }
 
 // NewWaveformComponent constructor
@@ -72,47 +72,52 @@ func NewWaveformComponent(id imgui.ID) *WaveComponent {
 			implot.AxisFlagsNoHighlight |
 			implot.AxisFlagsNoSideSwitch |
 			implot.AxisFlagsAutoFit,
-		eventSub: make(chan events.Event, 50),
 	}
 
 	cmp.Component = component.NewComponent[*WaveComponent](id, cmp.handleUpdate)
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	// Subscribe to playback progress events
+	// Subscribe to playback progress events using filtered subscription
 	bus := eventbus.Bus
 	uuid := cmp.UUID()
-	bus.Subscribe(events.AudioPlaybackProgressKey, uuid, cmp.eventSub)
-	bus.Subscribe(events.AudioPlaybackStartedKey, uuid, cmp.eventSub)
-	bus.Subscribe(events.AudioPlaybackStoppedKey, uuid, cmp.eventSub)
-	bus.Subscribe(events.AudioPlaybackFinishedKey, uuid, cmp.eventSub)
+	cmp.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 50)
+	cmp.filteredEventSub.SubscribeMultiple(
+		bus,
+		events.AudioPlaybackProgressKey,
+		events.AudioPlaybackStartedKey,
+		events.AudioPlaybackStoppedKey,
+		events.AudioPlaybackFinishedKey,
+	)
 
 	return cmp
 }
 
 // drainEvents translates global bus events into local commands
 func (wc *WaveComponent) drainEvents() {
-	for {
-		select {
-		case event := <-wc.eventSub:
-			if e, ok := event.(events.AudioPlaybackEventRecord); ok {
-				if wc.displayData.Path == "" || e.Path != wc.displayData.Path {
-					continue
-				}
+	if wc.filteredEventSub != nil {
+		for {
+			select {
+			case event := <-wc.filteredEventSub.Events():
+				if e, ok := event.(events.AudioPlaybackEventRecord); ok {
+					if wc.displayData.Path == "" || e.Path != wc.displayData.Path {
+						continue
+					}
 
-				// Translate to a local command
-				cmd := component.UpdateCmd{
-					Type: cmdUpdatePlaybackProgress,
-					Data: PlaybackProgressUpdate{
-						IsPlaying:       e.IsPlaying,
-						Progress:        e.Progress,
-						PositionSeconds: float64(e.PositionSamples) / float64(wc.displayData.SampleRate),
-					},
+					// Translate to a local command
+					cmd := component.UpdateCmd{
+						Type: cmdUpdatePlaybackProgress,
+						Data: PlaybackProgressUpdate{
+							IsPlaying:       e.IsPlaying,
+							Progress:        e.Progress,
+							PositionSeconds: float64(e.PositionSamples) / float64(wc.displayData.SampleRate),
+						},
+					}
+					wc.SendUpdate(cmd)
 				}
-				wc.SendUpdate(cmd)
+			default:
+				// No more events
+				return
 			}
-		default:
-			// No more events
-			return
 		}
 	}
 }
@@ -1126,13 +1131,10 @@ func (wc *WaveComponent) Layout() {
 
 // Destroy cleans up the component
 func (wc *WaveComponent) Destroy() {
-	// Unsubscribe from all events
-	bus := eventbus.Bus
-	uuid := wc.UUID()
-	bus.Unsubscribe(events.AudioPlaybackProgressKey, uuid)
-	bus.Unsubscribe(events.AudioPlaybackStartedKey, uuid)
-	bus.Unsubscribe(events.AudioPlaybackStoppedKey, uuid)
-	bus.Unsubscribe(events.AudioPlaybackFinishedKey, uuid)
+	// Unsubscribe from filtered subscriptions (handles all event types)
+	if wc.filteredEventSub != nil {
+		wc.filteredEventSub.Unsubscribe()
+	}
 
 	// Call the base component's destroy method
 	wc.Component.Destroy()

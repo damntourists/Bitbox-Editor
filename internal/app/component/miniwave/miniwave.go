@@ -39,7 +39,7 @@ type MiniWaveformComponent struct {
 	normalizeFactor      float32
 	lastCacheRequestTime float64
 
-	eventSub chan events.Event
+	filteredEventSub *eventbus.FilteredSubscription
 }
 
 // NewMiniWaveform creates a new waveform component
@@ -54,37 +54,42 @@ func NewMiniWaveform(id imgui.ID, path string) *MiniWaveformComponent {
 		lastCachedColormap:   theme.GetCurrentColormap(),
 		normalizeFactor:      1.0,
 		lastCacheRequestTime: 0.0,
-		eventSub:             make(chan events.Event, 10),
 	}
 
 	cmp.Component = component.NewComponent[*MiniWaveformComponent](id, cmp.handleUpdate)
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	// Subscribe to all load events. drainEvents will filter by path.
+	// Subscribe to all load events using filtered subscription
 	bus := eventbus.Bus
 	uuid := cmp.UUID()
-	bus.Subscribe(events.AudioMetadataLoadedKey, uuid, cmp.eventSub)
-	bus.Subscribe(events.AudioSamplesLoadedKey, uuid, cmp.eventSub)
-	bus.Subscribe(events.AudioLoadFailedKey, uuid, cmp.eventSub)
+	cmp.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 10)
+	cmp.filteredEventSub.SubscribeMultiple(
+		bus,
+		events.AudioMetadataLoadedKey,
+		events.AudioSamplesLoadedKey,
+		events.AudioLoadFailedKey,
+	)
 
 	return cmp
 }
 
 // drainEvents reads from the event bus subscription channel and translates relevant events into local commands.
 func (mw *MiniWaveformComponent) drainEvents() {
-	for {
-		select {
-		case event := <-mw.eventSub:
-			// Check if it's an audio load event
-			if e, ok := event.(events.AudioLoadEventRecord); ok {
-				// Check if it's for the file this component cares about
-				if e.Path == mw.path {
-					mw.SendUpdate(component.UpdateCmd{Type: cmdUpdateStateFromCache})
+	if mw.filteredEventSub != nil {
+		for {
+			select {
+			case event := <-mw.filteredEventSub.Events():
+				// Check if it's an audio load event
+				if e, ok := event.(events.AudioLoadEventRecord); ok {
+					// Check if it's for the file this component cares about
+					if e.Path == mw.path {
+						mw.SendUpdate(component.UpdateCmd{Type: cmdUpdateStateFromCache})
+					}
 				}
+			default:
+				// No more events
+				return
 			}
-		default:
-			// No more events
-			return
 		}
 	}
 }
@@ -109,9 +114,6 @@ func (mw *MiniWaveformComponent) updateStateFromCache() {
 		mw.isReady = true
 		mw.loadFailed = snapshot.LoadErr != nil
 		// Mark cache as invalid so Layout() will rebuild it
-		if mw.cacheValid {
-			log.Debug("Invalidating cache due to new data", zap.String("path", mw.path))
-		}
 		mw.cacheValid = false
 	} else if snapshot.LoadErr != nil {
 		mw.loadFailed = true
@@ -416,12 +418,10 @@ func (mw *MiniWaveformComponent) renderPlaceholder(width, height float32) {
 
 // Destroy cleans up the component
 func (mw *MiniWaveformComponent) Destroy() {
-	// Unsubscribe from all events
-	bus := eventbus.Bus
-	uuid := mw.UUID()
-	bus.Unsubscribe(events.AudioMetadataLoadedKey, uuid)
-	bus.Unsubscribe(events.AudioSamplesLoadedKey, uuid)
-	bus.Unsubscribe(events.AudioLoadFailedKey, uuid)
+	// Unsubscribe from filtered subscriptions (handles all event types)
+	if mw.filteredEventSub != nil {
+		mw.filteredEventSub.Unsubscribe()
+	}
 
 	// Call the base component's destroy method
 	mw.Component.Destroy()

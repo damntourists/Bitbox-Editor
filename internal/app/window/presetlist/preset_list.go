@@ -39,7 +39,7 @@ type PresetListWindow struct {
 	presetLocation *storage.StorageLocation
 	loading        bool
 
-	eventSub chan events.Event
+	filteredEventSub *eventbus.FilteredSubscription
 }
 
 func NewPresetListWindow() *PresetListWindow {
@@ -48,7 +48,6 @@ func NewPresetListWindow() *PresetListWindow {
 		presetLocation: nil,
 		selectedPreset: nil,
 		loading:        false,
-		eventSub:       make(chan events.Event, 20),
 	}
 
 	w.Window = window.NewWindow[*PresetListWindow]("Presets", "ListMusic", w.handleUpdate)
@@ -72,30 +71,38 @@ func NewPresetListWindow() *PresetListWindow {
 
 	bus := eventbus.Bus
 	uuid := w.UUID()
-	bus.Subscribe(events.StorageActivatedEventKey, uuid, w.eventSub)
-	bus.Subscribe(events.ComponentClickEventKey, uuid, w.eventSub)
+
+	// Create filtered subscription for all events
+	w.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 20)
+	w.filteredEventSub.SubscribeMultiple(
+		bus,
+		events.StorageActivatedEventKey,
+		events.ComponentClickEventKey,
+	)
 
 	return w
 }
 
 // drainEvents translates global bus events into local commands
 func (w *PresetListWindow) drainEvents() {
-	for {
-		select {
-		case event := <-w.eventSub:
-			var cmd component.UpdateCmd
-			switch event.Type() {
-			case events.StorageActivatedEventKey:
-				cmd = component.UpdateCmd{Type: cmdPresetListSetLocation, Data: event}
-			case events.ComponentClickEventKey:
-				cmd = component.UpdateCmd{Type: cmdHandleRowClick, Data: event}
+	if w.filteredEventSub != nil {
+		for {
+			select {
+			case event := <-w.filteredEventSub.Events():
+				var cmd component.UpdateCmd
+				switch event.Type() {
+				case events.StorageActivatedEventKey:
+					cmd = component.UpdateCmd{Type: cmdPresetListSetLocation, Data: event}
+				case events.ComponentClickEventKey:
+					cmd = component.UpdateCmd{Type: cmdHandleRowClick, Data: event}
+				}
+				if cmd.Type != 0 {
+					w.SendUpdate(cmd)
+				}
+			default:
+				// No more events
+				return
 			}
-			if cmd.Type != 0 {
-				w.SendUpdate(cmd)
-			}
-		default:
-			// No more events
-			return
 		}
 	}
 }
@@ -278,11 +285,10 @@ func (w *PresetListWindow) Layout() {
 }
 
 func (w *PresetListWindow) Destroy() {
-	// Unsubscribe from all events
-	bus := eventbus.Bus
-	uuid := w.UUID()
-	bus.Unsubscribe(events.StorageActivatedEventKey, uuid)
-	bus.Unsubscribe(events.ComponentClickEventKey, uuid)
+	// Unsubscribe from filtered subscriptions
+	if w.filteredEventSub != nil {
+		w.filteredEventSub.Unsubscribe()
+	}
 
 	// Destroy child components
 	if w.Components.PresetTable != nil {
