@@ -99,7 +99,6 @@ type PresetEditWindow struct {
 	peakThreshold float32
 	playbackState *audio.PlaybackState
 
-	eventSub         chan events.Event
 	filteredEventSub *eventbus.FilteredSubscription
 }
 
@@ -112,7 +111,6 @@ func NewPresetEditWindow(p *preset.Preset, audioMgr *audio.AudioManager) *Preset
 		preset:         p,
 		waveformStates: make(map[string]*WaveformState),
 		peakThreshold:  0.5, // Default to 50% threshold
-		eventSub:       make(chan events.Event, 100),
 	}
 
 	windowTitle := "Preset Editor"
@@ -242,18 +240,16 @@ func NewPresetEditWindow(p *preset.Preset, audioMgr *audio.AudioManager) *Preset
 		events.AudioPlaybackStoppedKey,
 		events.AudioPlaybackFinishedKey,
 		events.PadGridSelectKey,
+		events.ComboboxSelectionChangeEventKey,
+		events.ComponentClickEventKey,
+		events.AudioMetadataLoadedKey,
+		events.AudioSamplesLoadedKey,
+		events.AudioLoadFailedKey,
 		// TODO: Add MIDI events here when ready:
 		// events.MidiPlaybackNoteOnKey,
 		// events.MidiPlaybackNoteOffKey,
 		// ...
 	)
-
-	// Subscribe to non-owned events (UI interactions, file loading)
-	bus.Subscribe(events.ComboboxSelectionChangeEventKey, uuid, w.eventSub)
-	bus.Subscribe(events.ComponentClickEventKey, uuid, w.eventSub)
-	bus.Subscribe(events.AudioMetadataLoadedKey, uuid, w.eventSub)
-	bus.Subscribe(events.AudioSamplesLoadedKey, uuid, w.eventSub)
-	bus.Subscribe(events.AudioLoadFailedKey, uuid, w.eventSub)
 
 	return w
 }
@@ -272,6 +268,12 @@ func (w *PresetEditWindow) drainEvents() {
 					cmd = component.UpdateCmd{Type: cmdHandleAudioStartStop, Data: event}
 				case events.PadGridSelectKey:
 					cmd = component.UpdateCmd{Type: cmdHandlePadGridClick, Data: event}
+				case events.ComboboxSelectionChangeEventKey:
+					cmd = component.UpdateCmd{Type: cmdHandleGridSizeChange, Data: event}
+				case events.ComponentClickEventKey:
+					cmd = component.UpdateCmd{Type: cmdHandleWaveformClick, Data: event}
+				case events.AudioMetadataLoadedKey, events.AudioSamplesLoadedKey, events.AudioLoadFailedKey:
+					cmd = component.UpdateCmd{Type: cmdHandleAudioLoad, Data: event}
 					// TODO: Add MIDI events
 					// case events.MidiPlaybackNoteOnKey:
 					//     cmd = UpdateCmd{Type: cmdHandleMidiNoteOn, Data: event}
@@ -1422,20 +1424,10 @@ func (w *PresetEditWindow) preloadPresetWavs(p *preset.Preset) {
 }
 
 func (w *PresetEditWindow) Destroy() {
-	// Unsubscribe from filtered subscriptions
+	// Unsubscribe from filtered subscriptions (handles all event types)
 	if w.filteredEventSub != nil {
 		w.filteredEventSub.Unsubscribe()
 	}
-
-	// Unsubscribe from legacy events (non-owned events)
-	bus := eventbus.Bus
-	uuid := w.UUID()
-	bus.Unsubscribe(events.PadGridSelectKey, uuid)
-	bus.Unsubscribe(events.ComboboxSelectionChangeEventKey, uuid)
-	bus.Unsubscribe(events.ComponentClickEventKey, uuid)
-	bus.Unsubscribe(events.AudioMetadataLoadedKey, uuid)
-	bus.Unsubscribe(events.AudioSamplesLoadedKey, uuid)
-	bus.Unsubscribe(events.AudioLoadFailedKey, uuid)
 
 	// Destroy children
 	w.Components.BoundsStartLabel.Destroy()
