@@ -1,7 +1,7 @@
 package label
 
 import (
-	"bitbox-editor/internal/app/animation" // Keep this import
+	"bitbox-editor/internal/app/animation"
 	"bitbox-editor/internal/app/component"
 	"bitbox-editor/internal/app/theme"
 	"bitbox-editor/internal/logging"
@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("label")
@@ -36,8 +35,7 @@ func NewLabelWithID(id imgui.ID, text string) *LabelComponent {
 
 	cmp := &LabelComponent{}
 
-	// Create the component with the handler
-	cmp.Component = component.NewComponent[*LabelComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*LabelComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 
 	cmp.SetText(text)
@@ -50,20 +48,11 @@ func NewLabelWithID(id imgui.ID, text string) *LabelComponent {
 	cmp.SetOutline(true)
 	cmp.SetOutlineColor(t.Style.Colors.Border.Vec4)
 
+	// Process initial updates immediately so properties are available for first render
+	// This is needed for labels that are created and immediately rendered (e.g., label.NewLabel("Text").Build())
+	cmp.Component.ProcessUpdates()
+
 	return cmp
-}
-
-// handleUpdate processes commands.
-func (lc *LabelComponent) handleUpdate(cmd component.UpdateCmd) {
-	if lc.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
-
-	log.Warn(
-		"LabelComponent unhandled update",
-		zap.String("id", lc.IDStr()),
-		zap.Any("cmd", cmd),
-	)
 }
 
 // Layout renders the label

@@ -15,7 +15,7 @@ import (
 )
 
 // TODO: Move to commands file
-type localCommand int // This type is private to the 'pad' package
+type localCommand int
 
 const (
 	cmdSetPadTextLines localCommand = iota
@@ -33,6 +33,7 @@ type PadCellDisplayData struct {
 
 type PadComponent struct {
 	*component.Component[*PadComponent]
+	component.CommandRouter
 
 	row, col int
 	line1    string
@@ -55,7 +56,7 @@ func NewPad(id imgui.ID, row, col int, size float32) *PadComponent {
 		waveDisplayData: audio.WaveDisplayData{},
 		cellDisplayData: PadCellDisplayData{},
 	}
-	cmp.Component = component.NewComponent[*PadComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*PadComponent](id)
 	cmp.SetWidth(size)
 	// TODO: Update base padding to use vec2
 	cmp.SetPadding(t.Style.FramePadding[0])
@@ -78,41 +79,28 @@ func NewPad(id imgui.ID, row, col int, size float32) *PadComponent {
 	cmp.SetClickable(true)
 
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadTextLines, cmp.onSetTextLines)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadWaveDisplayData, cmp.onSetWaveDisplayData)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadCellDisplayData, cmp.onSetCellDisplayData)
+
 	return cmp
 }
 
-func (p *PadComponent) handleUpdate(cmd component.UpdateCmd) {
-	handled := p.Component.HandleGlobalUpdate(cmd)
+func (p *PadComponent) onSetTextLines(lines [3]string) {
+	p.line1 = lines[0]
+	p.line2 = lines[1]
+	p.line3 = lines[2]
+}
 
-	switch cmd.Type {
-	case cmdSetPadTextLines:
-		if lines, ok := cmd.Data.([3]string); ok {
-			p.line1 = lines[0]
-			p.line2 = lines[1]
-			p.line3 = lines[2]
-		}
-	case cmdSetPadWaveDisplayData:
-		if data, ok := cmd.Data.(audio.WaveDisplayData); ok {
-			//log.Debug("Pad received wave display data update",
-			//	zap.String("padID", p.IDStr()),
-			//	zap.String("path", data.Path),
-			//	zap.String("filename", data.Name),
-			//	zap.Bool("isReady", data.IsReady))
-			p.waveDisplayData = data
-		}
-	case cmdSetPadCellDisplayData:
-		if data, ok := cmd.Data.(PadCellDisplayData); ok {
-			p.cellDisplayData = data
-		}
-	default:
-		if !handled {
-			log.Warn(
-				"PadComponent unhandled update",
-				zap.String("id", p.IDStr()),
-				zap.Any("cmd", cmd),
-			)
-		}
-	}
+func (p *PadComponent) onSetWaveDisplayData(data audio.WaveDisplayData) {
+	p.waveDisplayData = data
+}
+
+func (p *PadComponent) onSetCellDisplayData(data PadCellDisplayData) {
+	p.cellDisplayData = data
 }
 
 func (p *PadComponent) Row() int {
@@ -139,12 +127,12 @@ func (p *PadComponent) GetWavePath() string {
 }
 func (p *PadComponent) SetTextLines(l1, l2, l3 string) *PadComponent {
 	lines := [3]string{l1, l2, l3}
-	p.Component.SendUpdate(component.UpdateCmd{Type: cmdSetPadTextLines, Data: lines})
+	p.SendUpdate(component.UpdateCmd{Type: cmdSetPadTextLines, Data: lines})
 	return p
 }
 
 func (p *PadComponent) SetWaveDisplayData(data audio.WaveDisplayData) *PadComponent {
-	p.Component.SendUpdate(component.UpdateCmd{Type: cmdSetPadWaveDisplayData, Data: data})
+	p.SendUpdate(component.UpdateCmd{Type: cmdSetPadWaveDisplayData, Data: data})
 	return p
 }
 
@@ -153,7 +141,7 @@ func (p *PadComponent) GetWaveDisplayData() audio.WaveDisplayData {
 }
 
 func (p *PadComponent) SetCellDisplayData(data PadCellDisplayData) *PadComponent {
-	p.Component.SendUpdate(component.UpdateCmd{Type: cmdSetPadCellDisplayData, Data: data})
+	p.SendUpdate(component.UpdateCmd{Type: cmdSetPadCellDisplayData, Data: data})
 	return p
 }
 
@@ -199,12 +187,12 @@ func (p *PadComponent) Layout() {
 	}
 
 	if clicked {
-		eventbus.Bus.Publish(events.MouseEventRecord{
-			EventType: events.ComponentClickedEvent,
-			ImguiID:   p.ID(),
-			UUID:      p.UUID(),
-			Button:    events.MouseButtonLeft,
-			State:     p.State(),
+		eventbus.Bus.Publish(events.ComponentClickEvent{
+			IsDoubleClick: false,
+			ImguiID:       p.ID(),
+			UUID:          p.UUID(),
+			Button:        events.MouseButtonLeft,
+			State:         p.State(),
 			// Send a reference to this pad
 			Data: p,
 		})

@@ -9,7 +9,6 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/AllenDang/cimgui-go/implot"
 	"github.com/go-gl/mathgl/mgl32"
-	"go.uber.org/zap"
 )
 
 type RenderPrimitive struct {
@@ -32,25 +31,13 @@ func NewRenderPrimitive(id imgui.ID, primitiveName string) *RenderPrimitive {
 		OrthoSize:         1.5,
 	}
 
-	cmp.Component = component.NewComponent[*RenderPrimitive](id, nil)
+	cmp.Component = component.NewComponent[*RenderPrimitive](id)
 	cmp.SetLayoutBuilder(cmp)
 	return cmp
 }
 
-func (c *RenderPrimitive) handleUpdate(cmd component.UpdateCmd) {
-	if c.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
-
-	log.Warn(
-		"LabelComponent unhandled update",
-		zap.String("id", c.IDStr()),
-		zap.Any("cmd", cmd),
-	)
-}
-
 func (c *RenderPrimitive) SendUpdate(cmd component.UpdateCmd) {
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 }
 
 func (c *RenderPrimitive) Layout() {

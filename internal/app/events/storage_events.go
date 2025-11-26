@@ -1,14 +1,6 @@
 package events
 
-type StorageEventType int32
-
-const (
-	StorageActivatedEvent StorageEventType = iota
-	StorageDeselectedEvent
-	StorageMountedEvent
-	StorageUnmountedEvent
-)
-
+// Storage Event Keys
 const (
 	StorageActivatedEventKey  = "storage.activated"
 	StorageDeselectedEventKey = "storage.deselected"
@@ -16,25 +8,44 @@ const (
 	StorageUnmountedEventKey  = "storage.unmounted"
 )
 
-// StorageEventRecord is published when a storage location is selected, deselected, mounted, or unmounted.
-type StorageEventRecord struct {
-	EventType StorageEventType
-	// Data will be the *storage.StorageLocation struct.
-	Data interface{}
+// StorageActivatedEvent is published when a storage location is selected/activated.
+type StorageActivatedEvent struct {
+	// Location is the storage location that was activated.
+	// Type: *storage.StorageLocation
+	Location interface{}
 }
 
-// Type implements the events.Event interface, returning the string routing key.
-func (e StorageEventRecord) Type() string {
-	switch e.EventType {
-	case StorageActivatedEvent:
-		return StorageActivatedEventKey
-	case StorageDeselectedEvent:
-		return StorageDeselectedEventKey
-	case StorageMountedEvent:
-		return StorageMountedEventKey
-	case StorageUnmountedEvent:
-		return StorageUnmountedEventKey
-	default:
-		return "storage.unknown"
-	}
+func (e StorageActivatedEvent) Type() string {
+	return StorageActivatedEventKey
+}
+
+// StorageDeselectedEvent is published when a storage location is deselected.
+type StorageDeselectedEvent struct {
+	// No additional data needed
+}
+
+func (e StorageDeselectedEvent) Type() string {
+	return StorageDeselectedEventKey
+}
+
+// StorageMountedEvent is published when a storage device is mounted.
+type StorageMountedEvent struct {
+	// Location is the storage location that was mounted.
+	// Type: *storage.StorageLocation
+	Location interface{}
+}
+
+func (e StorageMountedEvent) Type() string {
+	return StorageMountedEventKey
+}
+
+// StorageUnmountedEvent is published when a storage device is unmounted.
+type StorageUnmountedEvent struct {
+	// Location is the storage location that was unmounted.
+	// Type: *storage.StorageLocation
+	Location interface{}
+}
+
+func (e StorageUnmountedEvent) Type() string {
+	return StorageUnmountedEventKey
 }

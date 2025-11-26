@@ -8,16 +8,6 @@ const (
 	ComponentHoverOutEventKey = "component.mouse.hover.out"
 )
 
-// ComponentEventType is the enum for all component-level UI interactions.
-type ComponentEventType int32
-
-const (
-	ComponentClickedEvent ComponentEventType = iota
-	ComponentDoubleClickedEvent
-	ComponentHoverInEvent
-	ComponentHoverOutEvent
-)
-
 // ItemState is a bitmask for a component UI state
 type ItemState uint32
 
@@ -48,40 +38,61 @@ const (
 	MouseButtonMiddle
 )
 
-// MouseEventRecord is published by a component when a mouse event occurs.
-type MouseEventRecord struct {
-	// EventType is the enum value (e.g., ComponentClickedEvent).
-	EventType ComponentEventType
-
+// ComponentClickEvent is published when a component is clicked or double-clicked.
+type ComponentClickEvent struct {
+	// IsDoubleClick indicates if this was a double-click event
+	IsDoubleClick bool
 	// ImguiID is the internal ImGui ID of the component.
 	ImguiID imgui.ID
-
 	// UUID is the event-bus-safe unique ID of the component.
 	UUID string
-
 	// The mouse button that was used for this event
 	Button MouseButton
-
 	// The state of the component when the event fired
 	State ItemState
-
 	// The component's drag-drop data, if any
 	Data interface{}
 }
 
 // Type implements the events.Event interface
-func (e MouseEventRecord) Type() string {
-	// It switches on the *enum*, not the string
-	switch e.EventType {
-	case ComponentClickedEvent,
-		ComponentDoubleClickedEvent:
-		return ComponentClickEventKey
-	case ComponentHoverInEvent:
-		return ComponentHoverInEventKey
-	case ComponentHoverOutEvent:
-		return ComponentHoverOutEventKey
-	// TODO: Add more event types. (e.g., drag, active)
-	default:
-		return "component.mouse.unknown"
-	}
+func (e ComponentClickEvent) Type() string {
+	return ComponentClickEventKey
+}
+
+// ComponentHoverInEvent is published when a component is hovered.
+type ComponentHoverInEvent struct {
+	// ImguiID is the internal ImGui ID of the component.
+	ImguiID imgui.ID
+	// UUID is the event-bus-safe unique ID of the component.
+	UUID string
+	// The mouse button that was used for this event
+	Button MouseButton
+	// The state of the component when the event fired
+	State ItemState
+	// The component's drag-drop data, if any
+	Data interface{}
+}
+
+// Type implements the events.Event interface
+func (e ComponentHoverInEvent) Type() string {
+	return ComponentHoverInEventKey
+}
+
+// ComponentHoverOutEvent is published when a component is no longer hovered.
+type ComponentHoverOutEvent struct {
+	// ImguiID is the internal ImGui ID of the component.
+	ImguiID imgui.ID
+	// UUID is the event-bus-safe unique ID of the component.
+	UUID string
+	// The mouse button that was used for this event
+	Button MouseButton
+	// The state of the component when the event fired
+	State ItemState
+	// The component's drag-drop data, if any
+	Data interface{}
+}
+
+// Type implements the events.Event interface
+func (e ComponentHoverOutEvent) Type() string {
+	return ComponentHoverOutEventKey
 }

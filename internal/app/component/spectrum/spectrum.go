@@ -96,7 +96,7 @@ func NewSpectrumAnalyzer(id imgui.ID, audioManager *audio.AudioManager) *Spectru
 		staticColorIdx: int32(staticColorIdx),
 	}
 
-	cmp.Component = component.NewComponent[*SpectrumAnalyzerComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*SpectrumAnalyzerComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 
 	// Set default dimensions
@@ -104,12 +104,6 @@ func NewSpectrumAnalyzer(id imgui.ID, audioManager *audio.AudioManager) *Spectru
 	cmp.Component.SetHeight(40.0)
 
 	return cmp
-}
-
-func (sa *SpectrumAnalyzerComponent) handleUpdate(cmd component.UpdateCmd) {
-	if sa.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
 }
 
 func (sa *SpectrumAnalyzerComponent) updateBars() {

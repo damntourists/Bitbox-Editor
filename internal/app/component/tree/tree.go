@@ -6,13 +6,13 @@ import (
 	"bitbox-editor/internal/logging"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("tree")
 
 type TreeComponent struct {
 	*component.Component[*TreeComponent]
+	component.CommandRouter
 
 	flags        imgui.TableFlags
 	rows         []*TreeRowComponent
@@ -33,48 +33,39 @@ func NewTree(id string) *TreeComponent {
 		freezeColumn: 0,
 	}
 
-	cmp.Component = component.NewComponent[*TreeComponent](imgui.IDStr(id), cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*TreeComponent](imgui.IDStr(id))
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTreeFlags, cmp.onSetFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTreeColumns, cmp.onSetColumns)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTreeRows, cmp.onSetRows)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTreeFreeze, cmp.onSetFreeze)
 
 	return cmp
 }
 
-func (tt *TreeComponent) handleUpdate(cmd component.UpdateCmd) {
-	if tt.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (tt *TreeComponent) onSetFlags(flags imgui.TableFlags) {
+	tt.flags = flags
+}
 
-	switch cmd.Type {
-	case cmdSetTreeFlags:
-		if flags, ok := cmd.Data.(imgui.TableFlags); ok {
-			tt.flags = flags
-		}
-	case cmdSetTreeColumns:
-		if cmd.Data == nil {
-			tt.columns = nil
-		} else if cols, ok := cmd.Data.([]*table.TableColumnComponent); ok {
-			tt.columns = cols
-		}
-	case cmdSetTreeRows:
-		if cmd.Data == nil {
-			tt.rows = nil
-		} else if rows, ok := cmd.Data.([]*TreeRowComponent); ok {
-			tt.rows = rows
-		}
-	case cmdSetTreeFreeze:
-		if payload, ok := cmd.Data.(table.TableFreezePayload); ok {
-			tt.freezeColumn = payload.Col
-			tt.freezeRow = payload.Row
-		}
-	default:
-		log.Warn("TreeComponent unhandled update", zap.String("id", tt.IDStr()), zap.Any("cmd", cmd))
-	}
+func (tt *TreeComponent) onSetColumns(cols []*table.TableColumnComponent) {
+	tt.columns = cols
+}
+
+func (tt *TreeComponent) onSetRows(rows []*TreeRowComponent) {
+	tt.rows = rows
+}
+
+func (tt *TreeComponent) onSetFreeze(payload table.TableFreezePayload) {
+	tt.freezeColumn = payload.Col
+	tt.freezeRow = payload.Row
 }
 
 func (tt *TreeComponent) Freeze(col, row int) *TreeComponent {
-	payload := table.TableFreezePayload{Col: col, Row: row} // Reuse payload type
+	payload := table.TableFreezePayload{Col: col, Row: row}
 	cmd := component.UpdateCmd{Type: cmdSetTreeFreeze, Data: payload}
-	tt.Component.SendUpdate(cmd)
+	tt.SendUpdate(cmd)
 	return tt
 }
 
@@ -85,7 +76,7 @@ func (tt *TreeComponent) Size(width, height float32) *TreeComponent {
 
 func (tt *TreeComponent) Flags(flags imgui.TableFlags) *TreeComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTreeFlags, Data: flags}
-	tt.Component.SendUpdate(cmd)
+	tt.SendUpdate(cmd)
 	return tt
 }
 
@@ -93,7 +84,7 @@ func (tt *TreeComponent) Columns(cols ...*table.TableColumnComponent) *TreeCompo
 	colsCopy := make([]*table.TableColumnComponent, len(cols))
 	copy(colsCopy, cols)
 	cmd := component.UpdateCmd{Type: cmdSetTreeColumns, Data: colsCopy}
-	tt.Component.SendUpdate(cmd)
+	tt.SendUpdate(cmd)
 	return tt
 }
 
@@ -101,7 +92,7 @@ func (tt *TreeComponent) Rows(rows ...*TreeRowComponent) *TreeComponent {
 	rowsCopy := make([]*TreeRowComponent, len(rows))
 	copy(rowsCopy, rows)
 	cmd := component.UpdateCmd{Type: cmdSetTreeRows, Data: rowsCopy}
-	tt.Component.SendUpdate(cmd)
+	tt.SendUpdate(cmd)
 	return tt
 }
 

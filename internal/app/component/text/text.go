@@ -5,13 +5,13 @@ import (
 	"bitbox-editor/internal/logging"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("text")
 
 type TextComponent struct {
 	*component.Component[*TextComponent]
+	component.CommandRouter
 
 	font       *imgui.Font
 	wrapped    bool
@@ -19,19 +19,7 @@ type TextComponent struct {
 }
 
 func NewText(text string) *TextComponent {
-	cmp := &TextComponent{
-		font:       nil,
-		wrapped:    false,
-		selectable: false,
-	}
-
-	cmp.Component = component.NewComponent[*TextComponent](imgui.IDStr(text), cmp.handleUpdate)
-	cmp.SetText(text)
-	cmp.SetSelected(false)
-
-	cmp.Component.SetLayoutBuilder(cmp)
-
-	return cmp
+	return NewTextWithID(imgui.IDStr(text), text)
 }
 
 func NewTextWithID(id imgui.ID, text string) *TextComponent {
@@ -41,60 +29,45 @@ func NewTextWithID(id imgui.ID, text string) *TextComponent {
 		selectable: false,
 	}
 
-	cmp.Component = component.NewComponent[*TextComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*TextComponent](id)
 	cmp.SetText(text)
 	cmp.SetSelected(false)
 
 	cmp.Component.SetLayoutBuilder(cmp)
 
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTextFont, cmp.onSetFont)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTextWrapped, cmp.onSetWrapped)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTextSelectable, cmp.onSetSelectable)
+
+	// Process initial updates immediately so properties are available for first render
+	// This is needed for text components that are created and immediately rendered
+	cmp.Component.ProcessUpdates()
+
 	return cmp
 }
 
-func (tc *TextComponent) handleUpdate(cmd component.UpdateCmd) {
-	if tc.Component.HandleGlobalUpdate(cmd) {
-		// Handled by base (e.g., CmdSetText, CmdSetSelected)
-		return
-	}
+func (tc *TextComponent) onSetFont(font *imgui.Font) {
+	tc.font = font
+}
 
-	switch cmd.Type {
-	case cmdSetTextFont:
-		// Allow nil font
-		if cmd.Data == nil {
-			tc.font = nil
-		} else if font, ok := cmd.Data.(*imgui.Font); ok {
-			tc.font = font
-		} else {
-			log.Warn("Invalid data type for cmdSetTextFont", zap.Any("data", cmd.Data))
-		}
+func (tc *TextComponent) onSetWrapped(wrap bool) {
+	tc.wrapped = wrap
+}
 
-	case cmdSetTextWrapped:
-		if wrap, ok := cmd.Data.(bool); ok {
-			tc.wrapped = wrap
-		}
-
-	case cmdSetTextSelectable:
-		if sel, ok := cmd.Data.(bool); ok {
-			tc.selectable = sel
-		}
-
-	default:
-		log.Warn(
-			"TextComponent unhandled update",
-			zap.String("id", tc.IDStr()),
-			zap.Any("cmd", cmd),
-		)
-	}
+func (tc *TextComponent) onSetSelectable(sel bool) {
+	tc.selectable = sel
 }
 
 func (tc *TextComponent) SetWrapped(wrap bool) *TextComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTextWrapped, Data: wrap}
-	tc.Component.SendUpdate(cmd)
+	tc.SendUpdate(cmd)
 	return tc
 }
 
 func (tc *TextComponent) SetFont(font *imgui.Font) *TextComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTextFont, Data: font}
-	tc.Component.SendUpdate(cmd)
+	tc.SendUpdate(cmd)
 	return tc
 }
 
@@ -105,15 +78,11 @@ func (tc *TextComponent) SetSelected(selected bool) *TextComponent {
 
 func (tc *TextComponent) SetSelectable(selectable bool) *TextComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTextSelectable, Data: selectable}
-	tc.Component.SendUpdate(cmd)
+	tc.SendUpdate(cmd)
 	return tc
 }
 
 func (tc *TextComponent) DisableHoverAnimations() *TextComponent {
-	// This is now handled by the base component, but we can keep
-	// this setter for a clean API.
-	// (Assumes CmdSetHoverAnimationsDisabled exists in base component)
-	// tc.Component.SendUpdate(component.UpdateCmd{Type: component.CmdSetHoverAnimationsDisabled, Data: true})
 	return tc
 }
 
@@ -152,8 +121,9 @@ func (tc *TextComponent) Layout() {
 
 	if selectable {
 		flags := imgui.SelectableFlagsSpanAllColumns
-		imgui.SelectableBoolV(text, selected, flags, imgui.Vec2{})
-
+		if imgui.SelectableBoolV(text, selected, flags, imgui.Vec2{}) {
+			tc.Component.SetSelected(!selected)
+		}
 	} else {
 		imgui.TextUnformatted(text)
 	}

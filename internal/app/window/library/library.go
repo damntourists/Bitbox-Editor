@@ -37,7 +37,6 @@ const (
 	cmdLibSetFSTree
 	cmdLibSetTreeRows
 	cmdLibSetSearchQuery
-	cmdHandleScanEvent
 )
 
 var log = logging.NewLogger("library")
@@ -55,6 +54,8 @@ func hashString(s string) uint32 {
 // LibraryWindow is a window that displays a library of audio files.
 type LibraryWindow struct {
 	*window.Window[*LibraryWindow]
+	eventbus.EventRouter
+	component.CommandRouter
 
 	storageLoc    *storage.StorageLocation
 	fsTree        *io.FSTree
@@ -66,8 +67,6 @@ type LibraryWindow struct {
 	Components struct {
 		Tree *tree.TreeComponent
 	}
-
-	filteredEventSub *eventbus.FilteredSubscription
 }
 
 func (w *LibraryWindow) createTreeRowsFromData(data []tree.TreeRowData) []*tree.TreeRowComponent {
@@ -154,86 +153,66 @@ func (w *LibraryWindow) createInitialTopLevelRows(rowData []tree.TreeRowData) []
 	return w.createTreeRowsFromData(initialData)
 }
 
-// drainEvents translates global bus events into local commands
-func (w *LibraryWindow) drainEvents() {
-	if w.filteredEventSub != nil {
-		for {
-			select {
-			case event := <-w.filteredEventSub.Events():
-				if e, ok := event.(events.LibraryScanEventRecord); ok {
-					w.SendUpdate(UpdateCmd{Type: cmdHandleScanEvent, Data: e})
-				}
-			default:
-				return
-			}
-		}
+func (w *LibraryWindow) onScanStarted(event events.Event) {
+	if e, ok := event.(events.LibraryScanStartedEvent); ok {
+		log.Debug("Library scan started", zap.String("path", e.Path))
 	}
 }
 
-func (w *LibraryWindow) handleUpdate(cmd component.UpdateCmd) {
-	if w.Window.HandleGlobalUpdate(cmd) {
-		return
+func (w *LibraryWindow) onScanProgress(event events.Event) {
+	if e, ok := event.(events.LibraryScanProgressEvent); ok {
+		log.Debug("Library scan progress",
+			zap.String("path", e.Path),
+			zap.Float64("progress", e.Progress))
 	}
+}
 
-	switch cmd.Type {
-	case cmdLibSetStorageLoc:
-		if loc, ok := cmd.Data.(*storage.StorageLocation); ok {
-			if w.storageLoc == nil || w.storageLoc.Path != loc.Path {
-				w.storageLoc = loc
-				w.fsTree = nil
-				w.searchResults = nil
-				w.searchQuery = ""
-				w.startScan()
-			}
-		}
+func (w *LibraryWindow) onScanCompleted(event events.Event) {
+	if e, ok := event.(events.LibraryScanCompletedEvent); ok {
+		log.Debug("Library scan completed",
+			zap.String("path", e.Path),
+			zap.Int("fileCount", e.FileCount))
+	}
+}
 
-	case cmdLibSetScanning:
-		if scanning, ok := cmd.Data.(bool); ok {
-			w.isScanning = scanning
-		}
+func (w *LibraryWindow) onScanFailed(event events.Event) {
+	if e, ok := event.(events.LibraryScanFailedEvent); ok {
+		log.Error("Library scan failed",
+			zap.String("path", e.Path),
+			zap.Error(e.Error))
+	}
+}
 
-	case cmdLibSetFSTree:
-		if tree, ok := cmd.Data.(*io.FSTree); ok {
-			w.fsTree = tree
-			go w.buildAndSetTreeRowsInBackground()
-		}
+func (w *LibraryWindow) onSetStorageLoc(loc *storage.StorageLocation) {
+	if w.storageLoc == nil || w.storageLoc.Path != loc.Path {
+		w.storageLoc = loc
+		w.fsTree = nil
+		w.searchResults = nil
+		w.searchQuery = ""
+		w.startScan()
+	}
+}
 
-	case cmdLibSetTreeRows:
-		if rowData, ok := cmd.Data.([]tree.TreeRowData); ok {
-			if w.Components.Tree != nil {
-				componentRows := w.createInitialTopLevelRows(rowData)
-				w.Components.Tree.Rows(componentRows...)
-			}
-		}
+func (w *LibraryWindow) onSetScanning(scanning bool) {
+	w.isScanning = scanning
+}
 
-	case cmdLibSetSearchQuery:
-		if query, ok := cmd.Data.(string); ok {
-			if w.searchQuery != query {
-				w.searchQuery = query
-				go w.performSearchAndBuildRowsInBackground()
-			}
-		}
+func (w *LibraryWindow) onSetFSTree(tree *io.FSTree) {
+	w.fsTree = tree
+	go w.buildAndSetTreeRowsInBackground()
+}
 
-	case cmdHandleScanEvent:
-		if event, ok := cmd.Data.(events.LibraryScanEventRecord); ok {
-			switch event.EventType {
-			case events.LibraryScanStartedEvent:
-				log.Debug("Library scan started", zap.String("path", event.Path))
-			case events.LibraryScanProgressEvent:
-				log.Debug("Library scan progress", zap.Float64("progress", event.Progress))
-			case events.LibraryScanCompletedEvent:
-				log.Debug("Library scan completed",
-					zap.String("path", event.Path),
-					zap.Int("fileCount", event.FileCount))
-			case events.LibraryScanFailedEvent:
-				log.Error("Library scan failed",
-					zap.String("path", event.Path),
-					zap.Error(event.Error))
-			}
-		}
+func (w *LibraryWindow) onSetTreeRows(rowData []tree.TreeRowData) {
+	if w.Components.Tree != nil {
+		componentRows := w.createInitialTopLevelRows(rowData)
+		w.Components.Tree.Rows(componentRows...)
+	}
+}
 
-	default:
-		log.Warn("LibraryWindow unhandled update", zap.Any("cmd", cmd))
+func (w *LibraryWindow) onSetSearchQuery(query string) {
+	if w.searchQuery != query {
+		w.searchQuery = query
+		go w.performSearchAndBuildRowsInBackground()
 	}
 }
 
@@ -274,9 +253,8 @@ func (w *LibraryWindow) startScan() {
 
 	path := w.storageLoc.Path
 
-	eventbus.Bus.Publish(events.LibraryScanEventRecord{
-		EventType: events.LibraryScanStartedEvent,
-		Path:      path,
+	eventbus.Bus.Publish(events.LibraryScanStartedEvent{
+		Path: path,
 	})
 
 	go func() {
@@ -286,10 +264,9 @@ func (w *LibraryWindow) startScan() {
 		if err != nil {
 			log.Error("Failed to scan directory", zap.Error(err), zap.String("path", path))
 
-			eventbus.Bus.Publish(events.LibraryScanEventRecord{
-				EventType: events.LibraryScanFailedEvent,
-				Path:      path,
-				Error:     err,
+			eventbus.Bus.Publish(events.LibraryScanFailedEvent{
+				Path:  path,
+				Error: err,
 			})
 
 			doneCmd := UpdateCmd{Type: cmdLibSetScanning, Data: false}
@@ -302,11 +279,9 @@ func (w *LibraryWindow) startScan() {
 			)
 
 			eventbus.Bus.Publish(
-				events.LibraryScanEventRecord{
-					EventType: events.LibraryScanCompletedEvent,
+				events.LibraryScanCompletedEvent{
 					Path:      path,
 					FileCount: tree.GetFileCount(),
-					Progress:  1.0,
 				},
 			)
 
@@ -475,7 +450,7 @@ func (w *LibraryWindow) Menu() {
 }
 
 func (w *LibraryWindow) Layout() {
-	w.drainEvents()
+	w.EventRouter.ProcessEvents()
 	w.Window.ProcessUpdates()
 
 	storageLoc := w.storageLoc
@@ -549,10 +524,8 @@ func (w *LibraryWindow) Layout() {
 
 // Destroy cleans up the window and its subscriptions
 func (w *LibraryWindow) Destroy() {
-	// Unsubscribe from filtered subscriptions (handles all event types)
-	if w.filteredEventSub != nil {
-		w.filteredEventSub.Unsubscribe()
-	}
+	// Unsubscribe from all events
+	w.EventRouter.Destroy()
 
 	// Destroy child components
 	if w.Components.Tree != nil {
@@ -567,7 +540,7 @@ func NewLibraryWindow() *LibraryWindow {
 	w := &LibraryWindow{
 		isScanning: false,
 	}
-	w.Window = window.NewWindow[*LibraryWindow]("Library", "LibraryBig", w.handleUpdate)
+	w.Window = window.NewWindow[*LibraryWindow]("Library", "LibraryBig")
 
 	w.Components.Tree = tree.NewTree("library-tree").
 		Columns(
@@ -592,18 +565,20 @@ func NewLibraryWindow() *LibraryWindow {
 
 	w.Window.SetLayoutBuilder(w)
 
-	bus := eventbus.Bus
 	uuid := w.UUID()
 
-	// Create filtered subscription for library scan events
-	w.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 50)
-	w.filteredEventSub.SubscribeMultiple(
-		bus,
-		events.LibraryScanStartedKey,
-		events.LibraryScanProgressKey,
-		events.LibraryScanCompletedKey,
-		events.LibraryScanFailedKey,
-	)
+	w.EventRouter.Init(uuid)
+	w.OnEvent(events.LibraryScanStartedKey, w.onScanStarted)
+	w.OnEvent(events.LibraryScanProgressKey, w.onScanProgress)
+	w.OnEvent(events.LibraryScanCompletedKey, w.onScanCompleted)
+	w.OnEvent(events.LibraryScanFailedKey, w.onScanFailed)
+
+	w.CommandRouter.Init(w.Window)
+	component.OnCommandTyped(&w.CommandRouter, cmdLibSetStorageLoc, w.onSetStorageLoc)
+	component.OnCommandTyped(&w.CommandRouter, cmdLibSetScanning, w.onSetScanning)
+	component.OnCommandTyped(&w.CommandRouter, cmdLibSetFSTree, w.onSetFSTree)
+	component.OnCommandTyped(&w.CommandRouter, cmdLibSetTreeRows, w.onSetTreeRows)
+	component.OnCommandTyped(&w.CommandRouter, cmdLibSetSearchQuery, w.onSetSearchQuery)
 
 	return w
 }

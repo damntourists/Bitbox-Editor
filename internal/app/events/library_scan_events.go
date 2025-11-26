@@ -1,15 +1,5 @@
 package events
 
-type LibraryScanEvent int32
-
-// Library Scan Event Enums
-const (
-	LibraryScanStartedEvent LibraryScanEvent = iota
-	LibraryScanProgressEvent
-	LibraryScanCompletedEvent
-	LibraryScanFailedEvent
-)
-
 // Library Scan Event Keys
 const (
 	LibraryScanStartedKey   = "library.scan.started"
@@ -18,33 +8,41 @@ const (
 	LibraryScanFailedKey    = "library.scan.failed"
 )
 
-// LibraryScanEventRecord holds data for library scan operations.
-// It reports start, progress, completion, or failure.
-type LibraryScanEventRecord struct {
-	// EventType is the enum value (e.g., LibraryScanStartedEvent).
-	EventType LibraryScanEvent
-	// Path is the directory path being scanned.
+// LibraryScanStartedEvent is published when a library scan begins.
+type LibraryScanStartedEvent struct {
 	Path string
-	// FileCount is the total number of files found (in a Completed event).
+}
+
+func (e LibraryScanStartedEvent) Type() string {
+	return LibraryScanStartedKey
+}
+
+// LibraryScanProgressEvent is published during library scanning to report progress.
+type LibraryScanProgressEvent struct {
+	Path     string
+	Progress float64 // 0.0 to 1.0
+}
+
+func (e LibraryScanProgressEvent) Type() string {
+	return LibraryScanProgressKey
+}
+
+// LibraryScanCompletedEvent is published when a library scan completes successfully.
+type LibraryScanCompletedEvent struct {
+	Path      string
 	FileCount int
-	// Progress is the normalized scan progress (0.0 to 1.0).
-	Progress float64
-	// Error contains the specific error if the scan operation failed.
+}
+
+func (e LibraryScanCompletedEvent) Type() string {
+	return LibraryScanCompletedKey
+}
+
+// LibraryScanFailedEvent is published when a library scan fails.
+type LibraryScanFailedEvent struct {
+	Path  string
 	Error error
 }
 
-// Type implements the events.Event interface
-func (e LibraryScanEventRecord) Type() string {
-	switch e.EventType {
-	case LibraryScanStartedEvent:
-		return LibraryScanStartedKey
-	case LibraryScanProgressEvent:
-		return LibraryScanProgressKey
-	case LibraryScanCompletedEvent:
-		return LibraryScanCompletedKey
-	case LibraryScanFailedEvent:
-		return LibraryScanFailedKey
-	default:
-		return "library.scan.unknown"
-	}
+func (e LibraryScanFailedEvent) Type() string {
+	return LibraryScanFailedKey
 }

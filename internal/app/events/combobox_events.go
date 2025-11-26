@@ -1,17 +1,11 @@
 package events
 
-type ComboboxEvent int32
-
-const (
-	ComboboxSelectionChangeEvent ComboboxEvent = iota
-)
 const (
 	ComboboxSelectionChangeEventKey = "combobox.selectionchange"
 )
 
-// ComboboxEventRecord is published when a selection changes.
-type ComboboxEventRecord struct {
-	EventType ComboboxEvent
+// ComboboxSelectionChangeEvent is published when a combobox selection changes.
+type ComboboxSelectionChangeEvent struct {
 	// UUID is the unique ID of the component that sent the event.
 	UUID string
 	// Selected is the data of the item that was selected (e.g., a string).
@@ -19,11 +13,6 @@ type ComboboxEventRecord struct {
 }
 
 // Type implements the events.Event interface.
-func (e ComboboxEventRecord) Type() string {
-	switch e.EventType {
-	case ComboboxSelectionChangeEvent:
-		return ComboboxSelectionChangeEventKey
-	default:
-		return "combobox.unknown"
-	}
+func (e ComboboxSelectionChangeEvent) Type() string {
+	return ComboboxSelectionChangeEventKey
 }

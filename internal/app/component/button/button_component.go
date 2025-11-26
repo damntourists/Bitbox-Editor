@@ -14,7 +14,6 @@ import (
 	"strconv"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("button")
@@ -91,49 +90,13 @@ func NewButtonWithID(id imgui.ID, text string) *Button {
 		outlineColor: outlineColor,
 	}
 
-	cmp.Component = component.NewComponent[*Button](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*Button](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 
 	cmp.Component.SetBgColor(normalColor)
 	cmp.Component.SetBgHoveredColor(hoveredColor)
 
 	return cmp
-}
-
-func (b *Button) handleUpdate(cmd component.UpdateCmd) {
-	handled := b.Component.HandleGlobalUpdate(cmd)
-
-	// Handle button-specific updates
-	switch cmd.Type {
-	case component.CmdSetText:
-		if text, ok := cmd.Data.(string); ok {
-			b.text = text
-		}
-	case component.CmdSetEnabled:
-		if enabled, ok := cmd.Data.(bool); ok {
-			b.enabled = enabled
-			if enabled {
-				b.Component.StartVec4Animation(
-					component.CmdSetBgColor,
-					b.normalColor,
-					animation.DefaultColorFadeDuration,
-					animation.DefaultEasingFunction,
-				)
-			} else {
-				b.Component.StartVec4Animation(
-					component.CmdSetBgColor,
-					b.disabledColor,
-					animation.DefaultColorFadeDuration,
-					animation.DefaultEasingFunction,
-				)
-			}
-		}
-
-	default:
-		if !handled {
-			log.Warn("Button unhandled update", zap.Any("cmd", cmd))
-		}
-	}
 }
 
 func (b *Button) IsToggled() bool {

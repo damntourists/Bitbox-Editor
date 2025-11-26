@@ -7,6 +7,7 @@ package console
 */
 
 import (
+	"bitbox-editor/internal/app/component"
 	"bitbox-editor/internal/app/font"
 	"bitbox-editor/internal/app/theme"
 	"bitbox-editor/internal/app/window"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("console")
@@ -31,6 +31,7 @@ type logEntryWithHeight struct {
 
 type ConsoleWindow struct {
 	*window.Window[*ConsoleWindow]
+	component.CommandRouter
 
 	logs           []logging.LogRecord
 	logEntries     []logEntryWithHeight
@@ -56,44 +57,28 @@ func NewConsoleWindow() *ConsoleWindow {
 		needsRecalc:    true,
 	}
 
-	w.Window = window.NewWindow[*ConsoleWindow]("Console", "SquareTerminal", w.handleUpdate)
+	w.Window = window.NewWindow[*ConsoleWindow]("Console", "SquareTerminal")
 
 	w.Window.SetLayoutBuilder(w)
+
+	w.CommandRouter.Init(w.Window)
+	component.OnCommandTyped(&w.CommandRouter, cmdConsoleAddLog, w.onAddLog)
 
 	return w
 }
 
-// handleUpdate - processes incoming update commands
-func (w *ConsoleWindow) handleUpdate(cmd UpdateCmd) {
-	switch c := cmd.Type.(type) {
-	case window.GlobalCommand:
-		w.Window.HandleGlobalUpdate(cmd)
-		return
+func (w *ConsoleWindow) onAddLog(record logging.LogRecord) {
+	w.logs = append(w.logs, record)
 
-	case localCommand:
-		// Handle local commands
-		switch c {
-		case cmdConsoleAddLog:
-			if record, ok := cmd.Data.(logging.LogRecord); ok {
-				w.logs = append(w.logs, record)
-
-				// Trim logs if they exceed max lines
-				maxLines := config.GetConsoleMaxLines()
-				if len(w.logs) > maxLines {
-					w.logs = w.logs[len(w.logs)-maxLines:]
-				}
-
-				w.needsSort = true
-				w.needsRecalc = true
-				w.scrollToBottom = true
-			} else {
-				log.Warn("Invalid data type for cmdConsoleAddLog", zap.Any("data", cmd.Data))
-			}
-		}
-		return
-	default:
-		log.Warn("ConsoleWindow unhandled update", zap.Any("cmd", cmd))
+	// Trim logs if they exceed max lines
+	maxLines := config.GetConsoleMaxLines()
+	if len(w.logs) > maxLines {
+		w.logs = w.logs[len(w.logs)-maxLines:]
 	}
+
+	w.needsSort = true
+	w.needsRecalc = true
+	w.scrollToBottom = true
 }
 
 // drainLogChannel - drains log entries from the global log channel and sends them as

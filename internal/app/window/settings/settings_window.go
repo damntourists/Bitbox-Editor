@@ -36,6 +36,7 @@ type spectrumSettings struct {
 
 type SettingsWindow struct {
 	*window.Window[*SettingsWindow]
+	component.CommandRouter
 
 	currentThemeName    string
 	consoleMaxLines     int32
@@ -70,88 +71,79 @@ func NewSettingsWindow() *SettingsWindow {
 		spectrumTemp:        spectSettings,
 	}
 
-	w.Window = window.NewWindow[*SettingsWindow]("Settings", "Cog", w.handleUpdate)
+	w.Window = window.NewWindow[*SettingsWindow]("Settings", "Cog")
 
 	w.Window.SetLayoutBuilder(w)
+
+	w.CommandRouter.Init(w.Window)
+	component.OnCommandTyped(&w.CommandRouter, cmdSettingsSetTheme, w.onSetTheme)
+	component.OnCommandTyped(&w.CommandRouter, cmdSettingsUpdateCurrentThemeName, w.onUpdateCurrentThemeName)
+	component.OnCommandTyped(&w.CommandRouter, cmdSettingsSetConsoleMaxLines, w.onSetConsoleMaxLines)
+	component.OnCommandTyped(&w.CommandRouter, cmdSettingsSetColormap, w.onSetColormap)
+	component.OnCommandTyped(&w.CommandRouter, cmdSettingsSetSpectrumSettings, w.onSetSpectrumSettings)
 
 	return w
 }
 
-func (w *SettingsWindow) handleUpdate(cmd component.UpdateCmd) {
-	if w.Window.HandleGlobalUpdate(cmd) {
+func (w *SettingsWindow) onSetTheme(themeName string) {
+	newTheme, err := theme.GetThemeByName(themeName)
+	if err != nil {
+		log.Error("Failed to get theme by name", zap.String("name", themeName), zap.Error(err))
 		return
 	}
 
-	switch cmd.Type {
-	case cmdSettingsSetTheme:
-		if themeName, ok := cmd.Data.(string); ok {
-			newTheme, err := theme.GetThemeByName(themeName)
-			if err != nil {
-				log.Error("Failed to get theme by name", zap.String("name", themeName), zap.Error(err))
-				return
-			}
+	theme.TransitionToThemeWithEasing(newTheme, 500, animation.EaseOutCubic)
 
-			theme.TransitionToThemeWithEasing(newTheme, 500, animation.EaseOutCubic)
+	w.currentThemeName = newTheme.Name
 
-			w.currentThemeName = newTheme.Name
-
-			// Save theme to config
-			if err := config.SetTheme(themeName); err != nil {
-				log.Error("Failed to save theme to config", zap.Error(err))
-			}
-		}
-
-	case cmdSettingsUpdateCurrentThemeName:
-		if name, ok := cmd.Data.(string); ok {
-			w.currentThemeName = name
-		}
-
-	case cmdSettingsSetConsoleMaxLines:
-		if maxLines, ok := cmd.Data.(int); ok {
-			if err := config.SetConsoleMaxLines(maxLines); err != nil {
-				log.Error("Failed to save console max lines to config", zap.Error(err))
-			} else {
-				w.consoleMaxLines = int32(maxLines)
-				w.consoleMaxLinesTemp = int32(maxLines)
-			}
-		}
-
-	case cmdSettingsSetColormap:
-		if colormapName, ok := cmd.Data.(string); ok {
-			colormap := theme.GetColormapByName(colormapName)
-			theme.SetCurrentColormap(colormap)
-			w.currentColormap = colormapName
-
-			// Clear implot color cache to apply new colormap
-			implot.BustColorCache()
-
-			// Save colormap to config
-			if err := config.SetColormap(colormapName); err != nil {
-				log.Error("Failed to save colormap to config", zap.Error(err))
-			}
-		}
-
-	case cmdSettingsSetSpectrumSettings:
-		if settings, ok := cmd.Data.(spectrumSettings); ok {
-			// Save all spectrum settings to config
-			config.SetSpectrumAttackTime(int(settings.attackTime))
-			config.SetSpectrumAttackEasing(settings.attackEasing)
-			config.SetSpectrumDecayTime(int(settings.decayTime))
-			config.SetSpectrumDecayEasing(settings.decayEasing)
-			config.SetSpectrumPeakHoldTime(int(settings.peakHoldTime))
-			config.SetSpectrumPeakFallSpeed(float64(settings.peakFallSpeed))
-			config.SetSpectrumNoiseGate(float64(settings.noiseGate))
-			config.SetSpectrumColorMode(settings.colorMode)
-			config.SetSpectrumStaticColorIdx(int(settings.staticColorIdx))
-
-			// Update current settings
-			w.spectrumSettings = settings
-			w.spectrumTemp = settings
-		}
-
-	default:
-		log.Warn("SettingsWindow unhandled update", zap.Any("cmd", cmd))
+	// Save theme to config
+	if err := config.SetTheme(themeName); err != nil {
+		log.Error("Failed to save theme to config", zap.Error(err))
 	}
+}
+
+func (w *SettingsWindow) onUpdateCurrentThemeName(name string) {
+	w.currentThemeName = name
+}
+
+func (w *SettingsWindow) onSetConsoleMaxLines(maxLines int) {
+	if err := config.SetConsoleMaxLines(maxLines); err != nil {
+		log.Error("Failed to save console max lines to config", zap.Error(err))
+	} else {
+		w.consoleMaxLines = int32(maxLines)
+		w.consoleMaxLinesTemp = int32(maxLines)
+	}
+}
+
+func (w *SettingsWindow) onSetColormap(colormapName string) {
+	colormap := theme.GetColormapByName(colormapName)
+	theme.SetCurrentColormap(colormap)
+	w.currentColormap = colormapName
+
+	// Clear implot color cache to apply new colormap
+	implot.BustColorCache()
+
+	// Save colormap to config
+	if err := config.SetColormap(colormapName); err != nil {
+		log.Error("Failed to save colormap to config", zap.Error(err))
+	}
+}
+
+func (w *SettingsWindow) onSetSpectrumSettings(settings spectrumSettings) {
+	// Save all spectrum settings to config
+	config.SetSpectrumAttackTime(int(settings.attackTime))
+	config.SetSpectrumAttackEasing(settings.attackEasing)
+	config.SetSpectrumDecayTime(int(settings.decayTime))
+	config.SetSpectrumDecayEasing(settings.decayEasing)
+	config.SetSpectrumPeakHoldTime(int(settings.peakHoldTime))
+	config.SetSpectrumPeakFallSpeed(float64(settings.peakFallSpeed))
+	config.SetSpectrumNoiseGate(float64(settings.noiseGate))
+	config.SetSpectrumColorMode(settings.colorMode)
+	config.SetSpectrumStaticColorIdx(int(settings.staticColorIdx))
+
+	// Update current settings
+	w.spectrumSettings = settings
+	w.spectrumTemp = settings
 }
 
 func (w *SettingsWindow) Menu() {}

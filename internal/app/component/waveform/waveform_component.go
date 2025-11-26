@@ -17,13 +17,14 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/AllenDang/cimgui-go/implot"
 	"github.com/AllenDang/cimgui-go/utils"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("waveform")
 
 type WaveComponent struct {
 	*component.Component[*WaveComponent]
+	eventbus.EventRouter
+	component.CommandRouter
 
 	displayData audio.WaveDisplayData
 
@@ -45,8 +46,7 @@ type WaveComponent struct {
 	repeatMode     int
 	repeatSliceIdx int
 
-	emptyText        string
-	filteredEventSub *eventbus.FilteredSubscription
+	emptyText string
 }
 
 // NewWaveformComponent constructor
@@ -74,316 +74,50 @@ func NewWaveformComponent(id imgui.ID) *WaveComponent {
 			implot.AxisFlagsAutoFit,
 	}
 
-	cmp.Component = component.NewComponent[*WaveComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*WaveComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	// Subscribe to playback progress events using filtered subscription
-	bus := eventbus.Bus
-	uuid := cmp.UUID()
-	cmp.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 50)
-	cmp.filteredEventSub.SubscribeMultiple(
-		bus,
-		events.AudioPlaybackProgressKey,
-		events.AudioPlaybackStartedKey,
-		events.AudioPlaybackStoppedKey,
-		events.AudioPlaybackFinishedKey,
-	)
+	cmp.EventRouter.Init(cmp.UUID())
+	cmp.OnEvent(events.AudioPlaybackProgressKey, cmp.onPlaybackEvent)
+	cmp.OnEvent(events.AudioPlaybackStartedKey, cmp.onPlaybackEvent)
+	cmp.OnEvent(events.AudioPlaybackStoppedKey, cmp.onPlaybackEvent)
+	cmp.OnEvent(events.AudioPlaybackFinishedKey, cmp.onPlaybackEvent)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveDisplayData, cmp.onSetWaveDisplayData)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdUpdatePlaybackProgress, cmp.onUpdatePlaybackProgress)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveSlices, cmp.onSetWaveSlices)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveBounds, cmp.onSetWaveBounds)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveBoundsFromSamples, cmp.onSetWaveBoundsFromSamples)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveCursor, cmp.onSetWaveCursor)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWavePlotFlags, cmp.onSetWavePlotFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveAxisXFlags, cmp.onSetWaveAxisXFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetWaveAxisYFlags, cmp.onSetWaveAxisYFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdAddWaveSlice, cmp.onAddWaveSlice)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdUpdateWaveSlicePosition, cmp.onUpdateWaveSlicePosition)
 
 	return cmp
 }
 
-// drainEvents translates global bus events into local commands
-func (wc *WaveComponent) drainEvents() {
-	if wc.filteredEventSub != nil {
-		for {
-			select {
-			case event := <-wc.filteredEventSub.Events():
-				if e, ok := event.(events.AudioPlaybackEventRecord); ok {
-					if wc.displayData.Path == "" || e.Path != wc.displayData.Path {
-						continue
-					}
+// onPlaybackEvent handles all playback events (progress, started, stopped, finished)
+func (wc *WaveComponent) onPlaybackEvent(event events.Event) {
+	e := event.(events.AudioPlaybackEventRecord)
 
-					// Translate to a local command
-					cmd := component.UpdateCmd{
-						Type: cmdUpdatePlaybackProgress,
-						Data: PlaybackProgressUpdate{
-							IsPlaying:       e.IsPlaying,
-							Progress:        e.Progress,
-							PositionSeconds: float64(e.PositionSamples) / float64(wc.displayData.SampleRate),
-						},
-					}
-					wc.SendUpdate(cmd)
-				}
-			default:
-				// No more events
-				return
-			}
-		}
-	}
-}
-
-func (wc *WaveComponent) handleUpdate(cmd component.UpdateCmd) {
-	if wc.Component.HandleGlobalUpdate(cmd) {
-		if cmd.Type == component.CmdSetLoading {
-			wc.displayData.IsLoading = cmd.Data.(bool)
-		}
+	// Path filtering - only process events for our audio file
+	if wc.displayData.Path == "" || e.Path != wc.displayData.Path {
 		return
 	}
 
-	switch cmd.Type {
-	case cmdSetWaveDisplayData:
-		if data, ok := cmd.Data.(audio.WaveDisplayData); ok {
-			wc.displayData = data
-
-			// Recalculate samplesPerBin based on new data
-			if wc.displayData.NumSamples > 0 && wc.displayData.XLimitMax > 0 {
-				wc.samplesPerBin = float64(wc.displayData.NumSamples) / (wc.displayData.XLimitMax + 1)
-			} else {
-				wc.samplesPerBin = 1.0
-			}
-
-			// Only initialize bounds on first load or when explicitly cleared
-			if !wc.boundsInitialized && wc.displayData.XLimitMax > 0 {
-				wc.boundsStart = 0.0
-				wc.boundsEnd = wc.displayData.XLimitMax
-				log.Debug("Initialized bounds to full range",
-					zap.String("id", wc.IDStr()),
-					zap.Float64("boundsEnd", wc.boundsEnd))
-
-				if wc.boundsMarker == nil {
-					wc.boundsMarker = NewWaveBoundsMarker()
-				}
-
-				wc.boundsInitialized = true
-			}
-		}
-
-	case cmdUpdatePlaybackProgress:
-		if update, ok := cmd.Data.(PlaybackProgressUpdate); ok {
-			wc.displayData.IsPlaying = update.IsPlaying
-			wc.displayData.Progress = update.Progress
-			wc.displayData.PositionSeconds = update.PositionSeconds
-		}
-
-	case cmdSetWaveSlices:
-		if s, ok := cmd.Data.([]*WaveMarker); ok {
-			wc.slices = s
-		} else if cmd.Data == nil {
-			wc.slices = nil
-		}
-
-	case cmdSetWaveBounds:
-		if payload, ok := cmd.Data.(WaveBoundsPayload); ok {
-			wc.boundsStart = payload.Start
-			wc.boundsEnd = payload.End
-
-			// Adjust cursor position if it's now outside the new bounds
-			if wc.cursor != nil {
-				cursorPos := wc.cursor.position
-				if cursorPos < payload.Start || cursorPos > payload.End {
-					if cursorPos < payload.Start {
-						wc.cursor.SetPositionImmediate(payload.Start)
-					} else if cursorPos > payload.End {
-						wc.cursor.SetPositionImmediate(payload.End)
-					}
-					log.Debug("Cursor position adjusted due to bounds change",
-						zap.Float64("oldCursorPos", cursorPos),
-						zap.Float64("newCursorPos", wc.cursor.position))
-				}
-			}
-
-			// Adjust slice markers to stay within new bounds
-			minGap := 1.0
-			newPositions := make([]float64, len(wc.slices))
-			for i, slice := range wc.slices {
-				if slice == nil {
-					newPositions[i] = -1
-					continue
-				}
-
-				newPos := slice.start
-				if newPos < wc.boundsStart {
-					newPos = wc.boundsStart
-				}
-
-				if newPos > wc.boundsEnd {
-					newPos = wc.boundsEnd
-				}
-
-				newPositions[i] = newPos
-			}
-
-			// Second pass: adjust positions to maintain gaps. Left to right.
-			for i := 0; i < len(wc.slices); i++ {
-				if wc.slices[i] == nil || newPositions[i] < 0 {
-					continue
-				}
-
-				if i > 0 && wc.slices[i-1] != nil && newPositions[i-1] >= 0 {
-					minPos := newPositions[i-1] + minGap
-					if newPositions[i] < minPos {
-						newPositions[i] = minPos
-						if newPositions[i] > wc.boundsEnd {
-							newPositions[i] = -1
-						}
-					}
-				}
-			}
-
-			// Third pass: apply the new positions
-			for i, slice := range wc.slices {
-				if slice == nil || newPositions[i] < 0 {
-					continue
-				}
-
-				if newPositions[i] != slice.start {
-					slice.start = newPositions[i]
-				}
-			}
-
-			// Remove slices that are out of bounds
-			validSlices := make([]*WaveMarker, 0, len(wc.slices))
-			for i, slice := range wc.slices {
-				if slice == nil {
-					continue
-				}
-
-				if slice.start < wc.boundsStart || slice.start > wc.boundsEnd {
-					log.Warn("Removing slice marker outside bounds",
-						zap.Int("index", i),
-						zap.Float64("position", slice.start))
-					continue
-				}
-
-				canFit := true
-				if i > 0 && len(validSlices) > 0 {
-					prevSlice := validSlices[len(validSlices)-1]
-					if slice.start < prevSlice.start+minGap {
-						canFit = false
-						log.Warn("Removing slice marker - insufficient space",
-							zap.Int("index", i),
-							zap.Float64("position", slice.start))
-					}
-				}
-
-				if canFit {
-					validSlices = append(validSlices, slice)
-				}
-			}
-
-			if len(validSlices) != len(wc.slices) {
-				wc.slices = validSlices
-			}
-
-			if wc.boundsMarker == nil {
-				wc.boundsMarker = NewWaveBoundsMarker()
-			}
-		} else if cmd.Data == nil {
-			wc.boundsStart = 0.0
-
-			if wc.displayData.XLimitMax > 0 {
-				wc.boundsEnd = wc.displayData.XLimitMax
-			} else {
-				wc.boundsEnd = 0.0
-			}
-
-		}
-
-	case cmdSetWaveBoundsFromSamples:
-		if payload, ok := cmd.Data.(WaveBoundsSamplesPayload); ok {
-			if payload.StartSample == 0 && payload.EndSample == 0 {
-				break
-			}
-
-			startBin := 0.0
-			endBin := wc.displayData.XLimitMax
-			if wc.samplesPerBin > 0 {
-				startBin = float64(payload.StartSample) / wc.samplesPerBin
-				endBin = float64(payload.EndSample) / wc.samplesPerBin
-			}
-
-			tolerance := 0.1
-			if startBin >= 0 && endBin > startBin && endBin <= wc.displayData.XLimitMax+tolerance {
-				wc.boundsStart = startBin
-				wc.boundsEnd = endBin
-
-				if wc.boundsMarker == nil {
-					wc.boundsMarker = NewWaveBoundsMarker()
-				}
-			} else {
-				log.Warn("Invalid bounds calculated from samples, skipping update",
-					zap.Float64("startBin", startBin),
-					zap.Float64("endBin", endBin),
-					zap.Float64("xLimitMax", wc.displayData.XLimitMax))
-			}
-		}
-
-	case cmdSetWaveCursor:
-		if c, ok := cmd.Data.(*WaveCursor); ok {
-			wc.cursor = c
-		}
-
-	case cmdSetWavePlotFlags:
-		if f, ok := cmd.Data.(implot.Flags); ok {
-			wc.plotFlags = f
-		}
-
-	case cmdSetWaveAxisXFlags:
-		if f, ok := cmd.Data.(implot.AxisFlags); ok {
-			wc.axisXFlags = f
-		}
-
-	case cmdSetWaveAxisYFlags:
-		if f, ok := cmd.Data.(implot.AxisFlags); ok {
-			wc.axisYFlags = f
-		}
-
-	case cmdAddWaveSlice:
-		if marker, ok := cmd.Data.(*WaveMarker); ok {
-			wc.slices = append(wc.slices, marker)
-		}
-
-	case cmdUpdateWaveSlicePosition:
-		if payload, ok := cmd.Data.(WaveSlicePositionPayload); ok {
-			if payload.Index >= 0 && payload.Index < len(wc.slices) && wc.slices[payload.Index] != nil {
-				newStart := payload.NewStart
-				minBound := wc.boundsStart
-				maxBound := wc.boundsEnd
-
-				if newStart < minBound {
-					newStart = minBound
-				}
-
-				if newStart > maxBound {
-					newStart = maxBound
-				}
-
-				minGapBins := 1.0
-				if payload.Index > 0 && wc.slices[payload.Index-1] != nil {
-					prevEnd := wc.slices[payload.Index-1].start + minGapBins
-					if newStart < prevEnd {
-						newStart = prevEnd
-					}
-				}
-
-				if payload.Index < len(wc.slices)-1 && wc.slices[payload.Index+1] != nil {
-					nextStart := wc.slices[payload.Index+1].start - minGapBins
-					if newStart > nextStart {
-						newStart = nextStart
-					}
-				}
-				wc.slices[payload.Index].start = newStart
-			}
-		} else {
-			log.Warn("Invalid data type for cmdUpdateWaveSlicePosition", zap.Any("data", cmd.Data))
-		}
-	default:
-		log.Warn(
-			"WaveComponent unhandled update",
-			zap.String("id", wc.IDStr()),
-			zap.Any("cmd", cmd),
-		)
+	// Translate to a local command
+	cmd := component.UpdateCmd{
+		Type: cmdUpdatePlaybackProgress,
+		Data: PlaybackProgressUpdate{
+			IsPlaying:       e.IsPlaying,
+			Progress:        e.Progress,
+			PositionSeconds: float64(e.PositionSamples) / float64(wc.displayData.SampleRate),
+		},
 	}
+	wc.SendUpdate(cmd)
 }
 
 func (wc *WaveComponent) handleUserInteraction(xMin, xMax float64) {
@@ -460,12 +194,12 @@ func (wc *WaveComponent) handleUserInteraction(xMin, xMax float64) {
 			wc.cursor.SetPositionImmediate(x)
 		}
 
-		eventbus.Bus.Publish(events.MouseEventRecord{
-			EventType: events.ComponentClickedEvent,
-			ImguiID:   wc.ID(),
-			UUID:      wc.UUID(),
-			Button:    events.MouseButtonLeft,
-			State:     wc.State(),
+		eventbus.Bus.Publish(events.ComponentClickEvent{
+			IsDoubleClick: false,
+			ImguiID:       wc.ID(),
+			UUID:          wc.UUID(),
+			Button:        events.MouseButtonLeft,
+			State:         wc.State(),
 			Data: map[string]interface{}{
 				"seek":     true,
 				"position": seekPosition,
@@ -1043,7 +777,7 @@ func (wc *WaveComponent) SetAxisYFlags(flags implot.AxisFlags) *WaveComponent {
 }
 
 func (wc *WaveComponent) Layout() {
-	wc.drainEvents()
+	wc.EventRouter.ProcessEvents()
 	wc.Component.ProcessUpdates()
 
 	displayData := wc.displayData
@@ -1131,10 +865,8 @@ func (wc *WaveComponent) Layout() {
 
 // Destroy cleans up the component
 func (wc *WaveComponent) Destroy() {
-	// Unsubscribe from filtered subscriptions (handles all event types)
-	if wc.filteredEventSub != nil {
-		wc.filteredEventSub.Unsubscribe()
-	}
+	// Unsubscribe from all events
+	wc.EventRouter.Destroy()
 
 	// Call the base component's destroy method
 	wc.Component.Destroy()

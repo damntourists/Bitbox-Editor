@@ -106,7 +106,12 @@ type Component[T ComponentType] struct {
 	colormap      implot.Colormap
 }
 
-func NewComponent[T ComponentType](id imgui.ID, handler UpdateHandlerFunc) *Component[T] {
+func NewComponent[T ComponentType](id imgui.ID, handler ...UpdateHandlerFunc) *Component[T] {
+	var h UpdateHandlerFunc
+	if len(handler) > 0 {
+		h = handler[0]
+	}
+
 	return &Component[T]{
 		id:              id,
 		uuid:            uuid.NewString(),
@@ -114,7 +119,7 @@ func NewComponent[T ComponentType](id imgui.ID, handler UpdateHandlerFunc) *Comp
 		previousState:   events.ItemStateNone,
 		dragDropData:    nil,
 		updates:         make(chan UpdateCmd, 500),
-		handler:         handler,
+		handler:         h,
 		commandHandlers: make(map[any]func(UpdateCmd)),
 		animState:       make(map[UpdateCmdType]*animStateData),
 		enabled:         true,
@@ -125,7 +130,7 @@ func (c *Component[T]) Width() float32 {
 	return c.width
 }
 
-func (c *Component[T]) Height() float32 { // <-- ADDED
+func (c *Component[T]) Height() float32 {
 	return c.height
 }
 
@@ -228,12 +233,11 @@ func (c *Component[T]) State() events.ItemState {
 }
 
 // RegisterCommandHandler registers a handler for a specific command type.
-func (c *Component[T]) RegisterCommandHandler(cmdType any, handler func(UpdateCmd)) *Component[T] {
+func (c *Component[T]) RegisterCommandHandler(cmdType any, handler func(UpdateCmd)) {
 	if c.commandHandlers == nil {
 		c.commandHandlers = make(map[any]func(UpdateCmd))
 	}
 	c.commandHandlers[cmdType] = handler
-	return c
 }
 
 // UnregisterCommandHandler removes a handler for a specific command type.
@@ -266,14 +270,17 @@ func (c *Component[T]) SendUpdate(cmd UpdateCmd) {
 
 // ProcessUpdates drains the component's update channel and calls its handler.
 func (c *Component[T]) ProcessUpdates() {
+	// If no handlers are set, still process global commands
 	if c.handler == nil && len(c.commandHandlers) == 0 {
-		for {
+		for i := 0; i < maxMessagesPerFrame; i++ {
 			select {
-			case <-c.updates:
+			case cmd := <-c.updates:
+				c.HandleGlobalUpdate(cmd)
 			default:
 				return
 			}
 		}
+		return
 	}
 
 	// Limit the number of messages processed per frame
@@ -286,6 +293,9 @@ func (c *Component[T]) ProcessUpdates() {
 			} else if c.handler != nil {
 				// TODO: Update all other components to use new method above, method below is legacy
 				c.handler(cmd)
+			} else {
+				// No local handler found, try global commands
+				c.HandleGlobalUpdate(cmd)
 			}
 		default:
 			// Channel is empty, stop processing
@@ -602,16 +612,15 @@ func (c *Component[T]) handleMouseEvents() {
 		imgui.MouseButtonRight:  events.MouseButtonRight,
 		imgui.MouseButtonMiddle: events.MouseButtonMiddle,
 	}
-	var clickType events.ComponentEventType
+	var isDoubleClick bool
 	for ibt, ebt := range buttonTypes {
 		if imgui.IsItemClickedV(ibt) {
 			button = ebt
-			clickType = events.ComponentClickedEvent
 			clickSet = true
+			isDoubleClick = false
 
 			if imgui.IsMouseDoubleClicked(ibt) {
-				clickType = events.ComponentDoubleClickedEvent
-				clickSet = true
+				isDoubleClick = true
 			}
 		}
 	}
@@ -657,35 +666,35 @@ func (c *Component[T]) handleMouseEvents() {
 
 	// Check for a click event
 	if clickSet {
-		eventbus.Bus.Publish(events.MouseEventRecord{
-			EventType: clickType,
-			ImguiID:   c.ID(),
-			UUID:      c.UUID(),
-			Button:    button,
-			State:     c.state,
-			Data:      c.Data(),
+		eventbus.Bus.Publish(events.ComponentClickEvent{
+			IsDoubleClick: isDoubleClick,
+			ImguiID:       c.ID(),
+			UUID:          c.UUID(),
+			Button:        button,
+			State:         c.state,
+			Data:          c.Data(),
 		})
 	}
 
 	// Check for a hover-in event
 	if c.state.HasState(events.ItemStateHoverIn) {
-		eventbus.Bus.Publish(events.MouseEventRecord{
-			EventType: events.ComponentHoverInEvent,
-			ImguiID:   c.ID(),
-			UUID:      c.UUID(),
-			State:     c.state,
-			Data:      c.Data(),
+		eventbus.Bus.Publish(events.ComponentHoverInEvent{
+			ImguiID: c.ID(),
+			UUID:    c.UUID(),
+			Button:  button,
+			State:   c.state,
+			Data:    c.Data(),
 		})
 	}
 
 	// Check for a hover-out event
 	if c.state.HasState(events.ItemStateHoverOut) {
-		eventbus.Bus.Publish(events.MouseEventRecord{
-			EventType: events.ComponentHoverOutEvent,
-			ImguiID:   c.ID(),
-			UUID:      c.UUID(),
-			State:     c.state,
-			Data:      c.Data(),
+		eventbus.Bus.Publish(events.ComponentHoverOutEvent{
+			ImguiID: c.ID(),
+			UUID:    c.UUID(),
+			Button:  button,
+			State:   c.state,
+			Data:    c.Data(),
 		})
 	}
 }

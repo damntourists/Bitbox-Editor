@@ -294,3 +294,9 @@ func (ps *PlaybackState) SetCursorFromProgress(progress float64) {
 	boundsRange := float64(ps.BoundsEnd - ps.BoundsStart)
 	ps.CursorPosition = ps.BoundsStart + int(progress*boundsRange)
 }
+
+// ShouldRestartOnRegionChange returns true if playback needs to restart when region changes.
+func (ps *PlaybackState) ShouldRestartOnRegionChange(oldStart, oldEnd, newStart, newEnd int) bool {
+	// Always return true - beep.Take requires restart to update boundaries
+	return true
+}

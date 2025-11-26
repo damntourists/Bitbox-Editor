@@ -14,8 +14,14 @@ type EventChannel chan events.Event
 
 type EventBus struct {
 	mu sync.RWMutex
-	// Map of: eventType -> subscriberID -> channel
+	// subscribers - Map of: eventType -> subscriberID -> channel
 	subscribers map[string]map[string]EventChannel
+}
+
+func NewEventBus() *EventBus {
+	return &EventBus{
+		subscribers: make(map[string]map[string]EventChannel),
+	}
 }
 
 // Subscribe adds a channel to the list for a specific event type
@@ -68,8 +74,13 @@ func (bus *EventBus) Publish(event events.Event) {
 	}
 }
 
-func NewEventBus() *EventBus {
-	return &EventBus{
-		subscribers: make(map[string]map[string]EventChannel),
+// SubscriberCount returns the number of subscribers for a given event type
+func (bus *EventBus) SubscriberCount(eventType string) int {
+	bus.mu.RLock()
+	defer bus.mu.RUnlock()
+
+	if subs, ok := bus.subscribers[eventType]; ok {
+		return len(subs)
 	}
+	return 0
 }

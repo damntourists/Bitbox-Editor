@@ -5,11 +5,11 @@ import (
 	"image/color"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 type TableRowComponent struct {
 	*component.Component[*TableRowComponent]
+	component.CommandRouter
 
 	flags        imgui.TableRowFlags
 	minRowHeight float64
@@ -22,43 +22,28 @@ func NewTableRow(id imgui.ID, components ...component.ComponentType) *TableRowCo
 		minRowHeight: 0,
 	}
 
-	cmp.Component = component.NewComponent[*TableRowComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*TableRowComponent](id)
 	cmp.SetLayout(components...)
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableRowFlags, cmp.onSetFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableRowMinHeight, cmp.onSetMinHeight)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableRowLayout, cmp.onSetLayout)
 
 	return cmp
 }
 
-func (tr *TableRowComponent) handleUpdate(cmd component.UpdateCmd) {
-	if tr.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (tr *TableRowComponent) onSetFlags(flags imgui.TableRowFlags) {
+	tr.flags = flags
+}
 
-	switch cmd.Type {
-	case cmdSetTableRowFlags:
-		if flags, ok := cmd.Data.(imgui.TableRowFlags); ok {
-			tr.flags = flags
-		}
+func (tr *TableRowComponent) onSetMinHeight(h float64) {
+	tr.minRowHeight = h
+}
 
-	case cmdSetTableRowMinHeight:
-		if h, ok := cmd.Data.(float64); ok {
-			tr.minRowHeight = h
-		}
-
-	case cmdSetTableRowLayout:
-		if l, ok := cmd.Data.(component.Layout); ok {
-			tr.layout = l
-		} else if cmd.Data == nil {
-			tr.layout = nil
-		}
-
-	default:
-		log.Warn(
-			"TableRowComponent unhandled update",
-			zap.String("id", tr.IDStr()),
-			zap.Any("cmd", cmd),
-		)
-	}
+func (tr *TableRowComponent) onSetLayout(l component.Layout) {
+	tr.layout = l
 }
 
 func (tr *TableRowComponent) SetBgColor(c color.Color) *TableRowComponent {
@@ -69,13 +54,13 @@ func (tr *TableRowComponent) SetBgColor(c color.Color) *TableRowComponent {
 
 func (tr *TableRowComponent) SetFlags(flags imgui.TableRowFlags) *TableRowComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableRowFlags, Data: flags}
-	tr.Component.SendUpdate(cmd)
+	tr.SendUpdate(cmd)
 	return tr
 }
 
 func (tr *TableRowComponent) SetMinHeight(height float64) *TableRowComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableRowMinHeight, Data: height}
-	tr.Component.SendUpdate(cmd)
+	tr.SendUpdate(cmd)
 	return tr
 }
 
@@ -83,7 +68,7 @@ func (tr *TableRowComponent) SetLayout(components ...component.ComponentType) *T
 	layoutCopy := make(component.Layout, len(components))
 	copy(layoutCopy, components)
 	cmd := component.UpdateCmd{Type: cmdSetTableRowLayout, Data: layoutCopy}
-	tr.Component.SendUpdate(cmd)
+	tr.SendUpdate(cmd)
 	return tr
 }
 

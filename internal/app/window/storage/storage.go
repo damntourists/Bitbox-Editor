@@ -43,6 +43,8 @@ type StorageLocationsPayload struct {
 // StorageWindow is a window that displays available drives/storage.
 type StorageWindow struct {
 	*window.Window[*StorageWindow]
+	eventRouter eventbus.EventRouter
+	component.CommandRouter
 
 	// Child Components
 	driveTable *table.TableComponent
@@ -57,8 +59,6 @@ type StorageWindow struct {
 	// Background task control
 	stopMonitor chan struct{}
 	monitorWG   sync.WaitGroup
-
-	eventSub chan events.Event
 }
 
 func NewStorageWindow() *StorageWindow {
@@ -69,10 +69,9 @@ func NewStorageWindow() *StorageWindow {
 		selectedLocation: nil,
 		needsRebuild:     true,
 		stopMonitor:      nil,
-		eventSub:         make(chan events.Event, 50),
 	}
 
-	w.Window = window.NewWindow[*StorageWindow]("Storage", "HardDrive", w.handleUpdate)
+	w.Window = window.NewWindow[*StorageWindow]("Storage", "HardDrive")
 	w.SetFlags(imgui.WindowFlagsMenuBar)
 
 	w.driveTable = table.NewTableComponent(imgui.IDStr("storage-table")).
@@ -85,7 +84,16 @@ func NewStorageWindow() *StorageWindow {
 
 	w.Window.SetLayoutBuilder(w)
 
-	eventbus.Bus.Subscribe(events.ComponentClickEventKey, w.UUID(), w.eventSub)
+	uuid := w.UUID()
+
+	w.eventRouter.Init(uuid)
+	w.eventRouter.OnEvent(events.ComponentClickEventKey, w.onClick)
+
+	w.CommandRouter.Init(w.Window)
+	component.OnCommandTyped(&w.CommandRouter, cmdStorageSetLocations, w.onSetLocations)
+	component.OnCommandTyped(&w.CommandRouter, cmdStorageHandleClick, w.onHandleClick)
+	component.OnCommandTyped(&w.CommandRouter, cmdStorageSetSelected, w.onSetSelected)
+	component.OnCommandTyped(&w.CommandRouter, cmdStorageSetMonitor, w.onSetMonitor)
 
 	if w.driveMonitor {
 		w.stopMonitor = make(chan struct{})
@@ -95,104 +103,72 @@ func NewStorageWindow() *StorageWindow {
 	return w
 }
 
-func (w *StorageWindow) handleUpdate(cmd component.UpdateCmd) {
-	switch c := cmd.Type.(type) {
-
-	case window.GlobalCommand:
-		w.Window.HandleGlobalUpdate(cmd)
-		return
-
-	case localCommand:
-		switch c {
-		case cmdStorageSetLocations:
-			if payload, ok := cmd.Data.(StorageLocationsPayload); ok {
-				w.driveLocations = payload.Drives
-				foundSelected := false
-				currentSelection := w.selectedLocation
-				if currentSelection != nil {
-					for _, loc := range w.driveLocations {
-						if loc.Path == currentSelection.Path {
-							foundSelected = true
-							break
-						}
-					}
-					if !foundSelected {
-						for _, loc := range w.customLocations {
-							if loc.Path == currentSelection.Path {
-								foundSelected = true
-								break
-							}
-						}
-					}
-				}
-				if !foundSelected && w.selectedLocation != nil {
-					w.selectedLocation = nil
-					eventbus.Bus.Publish(events.StorageEventRecord{
-						EventType: events.StorageDeselectedEvent,
-						Data:      nil,
-					})
-				}
-				w.needsRebuild = true
+func (w *StorageWindow) onSetLocations(payload StorageLocationsPayload) {
+	w.driveLocations = payload.Drives
+	foundSelected := false
+	currentSelection := w.selectedLocation
+	if currentSelection != nil {
+		for _, loc := range w.driveLocations {
+			if loc.Path == currentSelection.Path {
+				foundSelected = true
+				break
 			}
-
-		case cmdStorageHandleClick:
-			if event, ok := cmd.Data.(events.MouseEventRecord); ok {
-				if loc, ok := event.Data.(*StorageLocation); ok {
-					w.SendUpdate(component.UpdateCmd{Type: cmdStorageSetSelected, Data: loc})
-				}
-			}
-
-		case cmdStorageSetSelected:
-			var newSelection *StorageLocation = nil
-			isValid := false
-			if cmd.Data == nil {
-				isValid = true
-			} else if loc, ok := cmd.Data.(*StorageLocation); ok {
-				newSelection = loc
-				isValid = true
-			} else {
-				log.Warn("Invalid data type for CmdStorageSetSelected", zap.Any("data", cmd.Data))
-			}
-
-			if isValid && (w.selectedLocation != newSelection) {
-				w.selectedLocation = newSelection
-				w.needsRebuild = true
-
-				eventType := events.StorageDeselectedEvent
-				if newSelection != nil {
-					eventType = events.StorageActivatedEvent
-				}
-				eventbus.Bus.Publish(events.StorageEventRecord{
-					EventType: eventType,
-					Data:      newSelection,
-				})
-			}
-
-		case cmdStorageSetMonitor:
-			if monitor, ok := cmd.Data.(bool); ok {
-				if w.driveMonitor != monitor {
-					w.driveMonitor = monitor
-					if !monitor {
-						if w.stopMonitor != nil {
-							select {
-							case <-w.stopMonitor:
-							default:
-								close(w.stopMonitor)
-							}
-							w.stopMonitor = nil
-						}
-					} else {
-						if w.stopMonitor == nil {
-							w.stopMonitor = make(chan struct{})
-							w.startDriveMonitor()
-						}
-					}
+		}
+		if !foundSelected {
+			for _, loc := range w.customLocations {
+				if loc.Path == currentSelection.Path {
+					foundSelected = true
+					break
 				}
 			}
 		}
-		return
-	default:
-		log.Warn("StorageWindow unhandled update", zap.Any("cmd", cmd))
+	}
+	if !foundSelected && w.selectedLocation != nil {
+		w.selectedLocation = nil
+		eventbus.Bus.Publish(events.StorageDeselectedEvent{})
+	}
+	w.needsRebuild = true
+}
+
+func (w *StorageWindow) onHandleClick(event events.ComponentClickEvent) {
+	if loc, ok := event.Data.(*StorageLocation); ok {
+		w.SendUpdate(component.UpdateCmd{Type: cmdStorageSetSelected, Data: loc})
+	}
+}
+
+func (w *StorageWindow) onSetSelected(loc *StorageLocation) {
+	if w.selectedLocation != loc {
+		w.selectedLocation = loc
+		w.needsRebuild = true
+
+		if loc != nil {
+			eventbus.Bus.Publish(events.StorageActivatedEvent{
+				Location: loc,
+			})
+		} else {
+			eventbus.Bus.Publish(events.StorageDeselectedEvent{})
+		}
+	}
+}
+
+func (w *StorageWindow) onSetMonitor(monitor bool) {
+	if w.driveMonitor != monitor {
+		w.driveMonitor = monitor
+		if !monitor {
+			if w.stopMonitor != nil {
+				select {
+				case <-w.stopMonitor:
+				default:
+					close(w.stopMonitor)
+				}
+				w.stopMonitor = nil
+			}
+		} else {
+			if w.stopMonitor == nil {
+				w.stopMonitor = make(chan struct{})
+				w.startDriveMonitor()
+			}
+		}
 	}
 }
 
@@ -325,23 +301,12 @@ func (w *StorageWindow) Menu() {
 	}
 }
 
-// drainEvents translates global bus events into local commands
-func (w *StorageWindow) drainEvents() {
-	for {
-		select {
-		case event := <-w.eventSub:
-			switch event.Type() {
-			case events.ComponentClickEventKey:
-				w.SendUpdate(component.UpdateCmd{Type: cmdStorageHandleClick, Data: event})
-			}
-		default:
-			return
-		}
-	}
+func (w *StorageWindow) onClick(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdStorageHandleClick, Data: event})
 }
 
 func (w *StorageWindow) Layout() {
-	w.drainEvents()
+	w.eventRouter.ProcessEvents()
 	w.Window.ProcessUpdates()
 
 	isLoading := w.Loading()
@@ -372,7 +337,7 @@ func (w *StorageWindow) Layout() {
 
 }
 
-func (w *StorageWindow) Shutdown() {
+func (w *StorageWindow) Destroy() {
 	// Signal monitor to stop and wait for it
 	if w.stopMonitor != nil {
 		select {
@@ -388,5 +353,11 @@ func (w *StorageWindow) Shutdown() {
 
 	log.Debug("Drive monitor stopped.")
 
-	eventbus.Bus.Unsubscribe(events.ComponentClickEventKey, w.UUID())
+	// Unsubscribe from all events
+	w.eventRouter.Destroy()
+
+	// Destroy child components
+	if w.driveTable != nil {
+		w.driveTable.Destroy()
+	}
 }

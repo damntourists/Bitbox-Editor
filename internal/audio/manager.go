@@ -53,6 +53,9 @@ type AudioManager struct {
 	commands chan audioCommand
 
 	waveCache sync.Map
+
+	// commandHandlers maps command types to handler functions
+	commandHandlers map[audioCommandType]func(audioCommand)
 }
 
 // getOrLoadWave retrieves a *WaveFile from global cache or loads a new wav file
@@ -840,158 +843,186 @@ func GetAudioManager() *AudioManager {
 	return globalAudioManager
 }
 
+func (am *AudioManager) initCommandHandlers() {
+	am.commandHandlers = make(map[audioCommandType]func(audioCommand))
+	am.commandHandlers[cmdSetVolume] = am.onSetVolume
+	am.commandHandlers[cmdGetVolume] = am.onGetVolume
+	am.commandHandlers[cmdClearSpeaker] = am.onClearSpeaker
+	am.commandHandlers[cmdPlayStreamer] = am.onPlayStreamer
+	am.commandHandlers[cmdSetCurrentWave] = am.onSetCurrentWave
+	am.commandHandlers[cmdGetCurrentWave] = am.onGetCurrentWave
+	am.commandHandlers[cmdSetProgressStream] = am.onSetProgressStream
+	am.commandHandlers[cmdGetProgressStream] = am.onGetProgressStream
+	am.commandHandlers[cmdSetOriginalBounds] = am.onSetOriginalBounds
+	am.commandHandlers[cmdGetOriginalBounds] = am.onGetOriginalBounds
+	am.commandHandlers[cmdSetSeekingFlag] = am.onSetSeekingFlag
+	am.commandHandlers[cmdPlaybackFinished] = am.onPlaybackFinished
+}
+
+func (am *AudioManager) onSetVolume(cmd audioCommand) {
+	if volumeCmd, ok := cmd.Data.(volumeCommand); ok {
+		am.volume = volumeCmd.Volume
+		eventbus.Bus.Publish(events.AudioVolumeChangedEvent{
+			Volume: volumeCmd.Volume,
+		})
+	} else {
+		log.Error("Invalid VolumeCommand data type")
+	}
+}
+
+func (am *AudioManager) onGetVolume(cmd audioCommand) {
+	if cmd.Response != nil {
+		select {
+		case cmd.Response <- am.volume:
+		default:
+			log.Warn("Failed to send GetVolume response")
+		}
+	}
+}
+
+func (am *AudioManager) onClearSpeaker(cmd audioCommand) {
+	speaker.Clear()
+}
+
+func (am *AudioManager) onPlayStreamer(cmd audioCommand) {
+	if playCmd, ok := cmd.Data.(playStreamerCommand); ok {
+		streamer := playCmd.Streamer
+		if streamer != nil {
+			speaker.Play(streamer)
+		} else {
+			log.Error("Invalid streamer type in PlayStreamerCommand or nil streamer")
+		}
+	} else {
+		log.Error("Invalid PlayStreamerCommand data type")
+	}
+}
+
+func (am *AudioManager) onSetCurrentWave(cmd audioCommand) {
+	if waveCmd, ok := cmd.Data.(setCurrentWaveCommand); ok {
+		wave := waveCmd.Wave
+		if wave != nil {
+			// Valid wave file
+			am.currentWave = wave
+			am.cachedCurrentWavePath.Store(wave.Path)
+			am.cachedIsPlaying.Store(true)
+		} else {
+			// nil or invalid type - clear state
+			am.currentWave = nil
+			am.cachedCurrentWavePath.Store("")
+			am.cachedIsPlaying.Store(false)
+		}
+	}
+}
+
+func (am *AudioManager) onGetCurrentWave(cmd audioCommand) {
+	if cmd.Response != nil {
+		select {
+		case cmd.Response <- getCurrentWaveResponse{Wave: am.currentWave}:
+		default:
+			log.Warn("Failed to send GetCurrentWave response")
+		}
+	}
+}
+
+func (am *AudioManager) onSetProgressStream(cmd audioCommand) {
+	if streamCmd, ok := cmd.Data.(setProgressStreamCommand); ok {
+		stream := streamCmd.Stream
+		if stream != nil {
+			am.currentProgressStream = stream
+			am.cachedProgressStreamPtr.Store(uintptr(unsafe.Pointer(stream)))
+		} else {
+			am.currentProgressStream = nil
+			am.cachedProgressStreamPtr.Store(0)
+		}
+	}
+}
+
+func (am *AudioManager) onGetProgressStream(cmd audioCommand) {
+	if cmd.Response != nil {
+		select {
+		case cmd.Response <- getProgressStreamResponse{Stream: am.currentProgressStream}:
+		default:
+			log.Warn("Failed to send GetProgressStream response")
+		}
+	}
+}
+
+func (am *AudioManager) onSetOriginalBounds(cmd audioCommand) {
+	if boundsCmd, ok := cmd.Data.(setOriginalBoundsCommand); ok {
+		am.originalStartMarker = boundsCmd.StartMarker
+		am.originalEndMarker = boundsCmd.EndMarker
+		am.cachedStartMarker.Store(int64(boundsCmd.StartMarker))
+		am.cachedEndMarker.Store(int64(boundsCmd.EndMarker))
+	}
+}
+
+func (am *AudioManager) onGetOriginalBounds(cmd audioCommand) {
+	if cmd.Response != nil {
+		response := getOriginalBoundsResponse{
+			StartMarker: am.originalStartMarker,
+			EndMarker:   am.originalEndMarker,
+			HasPlayback: am.currentWave != nil,
+		}
+		select {
+		case cmd.Response <- response:
+		default:
+			log.Warn("Failed to send GetOriginalBounds response")
+		}
+	}
+}
+
+func (am *AudioManager) onSetSeekingFlag(cmd audioCommand) {
+	if seekCmd, ok := cmd.Data.(setSeekingFlagCommand); ok {
+		am.isSeeking = seekCmd.IsSeeking
+	}
+}
+
+func (am *AudioManager) onPlaybackFinished(cmd audioCommand) {
+	if event, ok := cmd.Data.(playbackFinishedCommand); ok {
+		// Handle looping
+		if event.LoopEnabled {
+			// Get the stored playback state which has the correct region/slice info
+			stateInterface, ok := am.playbackStates.Load(event.Path)
+			if !ok {
+				log.Warn("Cannot loop: no playback state found",
+					zap.String("path", filepath.Base(event.Path)))
+				return
+			}
+
+			state, ok := stateInterface.(*PlaybackState)
+			if !ok || state == nil {
+				log.Warn("Cannot loop: invalid playback state",
+					zap.String("path", filepath.Base(event.Path)))
+				return
+			}
+
+			// Make a copy to avoid modifying the stored state
+			stateCopy := state.Copy()
+
+			// Get the playback region to reset cursor
+			regionStart, _, _ := stateCopy.GetPlaybackRegion()
+			am.cursorPositions.Store(event.Path, regionStart)
+
+			// Update state's cursor to region start for clean loop
+			stateCopy.CursorPosition = regionStart
+
+			// Restart playback using PlayWithState
+			_ = am.PlayWithState(stateCopy)
+		} else {
+			// Not looping. Check if it's still the current wave.
+			if am.currentWave != nil && uintptr(unsafe.Pointer(am.currentWave)) == event.WaveID {
+				am.setCurrentWave(nil)
+				am.setProgressStream(nil)
+			}
+		}
+	}
+}
+
 func (am *AudioManager) processCommands() {
 	for cmd := range am.commands {
-		switch cmd.Type {
-		case cmdSetVolume:
-			if volumeCmd, ok := cmd.Data.(volumeCommand); ok {
-				am.volume = volumeCmd.Volume
-				eventbus.Bus.Publish(events.AudioVolumeEventRecord{
-					EventType: events.AudioVolumeChangedEvent,
-					Volume:    volumeCmd.Volume,
-				})
-			} else {
-				log.Error("Invalid VolumeCommand data type")
-			}
-
-		case cmdGetVolume:
-			if cmd.Response != nil {
-				select {
-				case cmd.Response <- am.volume:
-				default:
-					log.Warn("Failed to send GetVolume response")
-				}
-			}
-
-		case cmdClearSpeaker:
-			speaker.Clear()
-
-		case cmdPlayStreamer:
-			if playCmd, ok := cmd.Data.(playStreamerCommand); ok {
-				streamer := playCmd.Streamer
-				if streamer != nil {
-					speaker.Play(streamer)
-				} else {
-					log.Error("Invalid streamer type in PlayStreamerCommand or nil streamer")
-				}
-			} else {
-				log.Error("Invalid PlayStreamerCommand data type")
-			}
-
-		case cmdSetCurrentWave:
-			if waveCmd, ok := cmd.Data.(setCurrentWaveCommand); ok {
-				wave := waveCmd.Wave
-				if wave != nil {
-					// Valid wave file
-					am.currentWave = wave
-					am.cachedCurrentWavePath.Store(wave.Path)
-					am.cachedIsPlaying.Store(true)
-				} else {
-					// nil or invalid type - clear state
-					am.currentWave = nil
-					am.cachedCurrentWavePath.Store("")
-					am.cachedIsPlaying.Store(false)
-				}
-			}
-
-		case cmdGetCurrentWave:
-			if cmd.Response != nil {
-				select {
-				case cmd.Response <- getCurrentWaveResponse{Wave: am.currentWave}:
-				default:
-					log.Warn("Failed to send GetCurrentWave response")
-				}
-			}
-
-		case cmdSetProgressStream:
-			if streamCmd, ok := cmd.Data.(setProgressStreamCommand); ok {
-				stream := streamCmd.Stream
-				if stream != nil {
-					am.currentProgressStream = stream
-					am.cachedProgressStreamPtr.Store(uintptr(unsafe.Pointer(stream)))
-				} else {
-					am.currentProgressStream = nil
-					am.cachedProgressStreamPtr.Store(0)
-				}
-			}
-
-		case cmdGetProgressStream:
-			if cmd.Response != nil {
-				select {
-				case cmd.Response <- getProgressStreamResponse{Stream: am.currentProgressStream}:
-				default:
-					log.Warn("Failed to send GetProgressStream response")
-				}
-			}
-
-		case cmdSetOriginalBounds:
-			if boundsCmd, ok := cmd.Data.(setOriginalBoundsCommand); ok {
-				am.originalStartMarker = boundsCmd.StartMarker
-				am.originalEndMarker = boundsCmd.EndMarker
-				am.cachedStartMarker.Store(int64(boundsCmd.StartMarker))
-				am.cachedEndMarker.Store(int64(boundsCmd.EndMarker))
-			}
-
-		case cmdGetOriginalBounds:
-			if cmd.Response != nil {
-				response := getOriginalBoundsResponse{
-					StartMarker: am.originalStartMarker,
-					EndMarker:   am.originalEndMarker,
-					HasPlayback: am.currentWave != nil,
-				}
-				select {
-				case cmd.Response <- response:
-				default:
-					log.Warn("Failed to send GetOriginalBounds response")
-				}
-			}
-
-		case cmdSetSeekingFlag:
-			if seekCmd, ok := cmd.Data.(setSeekingFlagCommand); ok {
-				am.isSeeking = seekCmd.IsSeeking
-			}
-
-		case cmdPlaybackFinished:
-			if event, ok := cmd.Data.(playbackFinishedCommand); ok {
-				// Handle looping
-				if event.LoopEnabled {
-					// Get the stored playback state which has the correct region/slice info
-					stateInterface, ok := am.playbackStates.Load(event.Path)
-					if !ok {
-						log.Warn("Cannot loop: no playback state found",
-							zap.String("path", filepath.Base(event.Path)))
-						continue
-					}
-
-					state, ok := stateInterface.(*PlaybackState)
-					if !ok || state == nil {
-						log.Warn("Cannot loop: invalid playback state",
-							zap.String("path", filepath.Base(event.Path)))
-						continue
-					}
-
-					// Make a copy to avoid modifying the stored state
-					stateCopy := state.Copy()
-
-					// Get the playback region to reset cursor
-					regionStart, _, _ := stateCopy.GetPlaybackRegion()
-					am.cursorPositions.Store(event.Path, regionStart)
-
-					// Update state's cursor to region start for clean loop
-					stateCopy.CursorPosition = regionStart
-
-					// Restart playback using PlayWithState
-					_ = am.PlayWithState(stateCopy)
-				} else {
-					// Not looping. Check if it's still the current wave.
-					if am.currentWave != nil && uintptr(unsafe.Pointer(am.currentWave)) == event.WaveID {
-						am.setCurrentWave(nil)
-						am.setProgressStream(nil)
-					}
-				}
-			}
-
-		default:
+		if handler, ok := am.commandHandlers[cmd.Type]; ok {
+			handler(cmd)
+		} else {
 			log.Warn("Unknown audio command type", zap.Int("type", int(cmd.Type)))
 		}
 	}

@@ -46,6 +46,9 @@ func init() {
 	globalAudioManager.cachedStartMarker.Store(0)
 	globalAudioManager.cachedEndMarker.Store(0)
 
+	// Initialize command handlers
+	globalAudioManager.initCommandHandlers()
+
 	// Start the FFT processing goroutine
 	go startFFTProcessor(
 		globalAudioManager.analyzerBuffer,

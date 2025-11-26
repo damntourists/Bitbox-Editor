@@ -57,6 +57,9 @@ type PadGridConfigPayload struct {
 
 type PadGridComponent struct {
 	*component.Component[*PadGridComponent]
+	eventbus.EventRouter
+	component.CommandRouter
+
 	rows, cols, padSize int
 
 	pads                []*pad.PadComponent
@@ -65,114 +68,77 @@ type PadGridComponent struct {
 
 	preset *preset.Preset
 
-	eventSub chan events.Event
-	ownerID  string
+	ownerID string
 }
 
 func NewPadGrid(id imgui.ID, rows, cols, size int) *PadGridComponent {
 	cmp := &PadGridComponent{
-		rows:     rows,
-		cols:     cols,
-		padSize:  size,
-		preset:   nil,
-		eventSub: make(chan events.Event, 50),
+		rows:    rows,
+		cols:    cols,
+		padSize: size,
+		preset:  nil,
 	}
 
-	cmp.Component = component.NewComponent[*PadGridComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*PadGridComponent](id)
 
 	cmp.initPads()
 
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	eventbus.Bus.Subscribe(events.ComponentClickEventKey, cmp.UUID(), cmp.eventSub)
+	cmp.EventRouter.Init(cmp.UUID())
+	cmp.OnEvent(events.ComponentClickEventKey, cmp.onComponentClick)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadGridConfig, cmp.onSetPadGridConfig)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadGridPreset, cmp.onSetPadGridPreset)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdHandlePadClick, cmp.onHandlePadClick)
 
 	return cmp
 }
 
-// drainEvents translates global bus events into local commands
-func (c *PadGridComponent) drainEvents() {
-	for {
-		select {
-		case event := <-c.eventSub:
-			var cmd component.UpdateCmd
-			switch event.Type() {
-			case events.ComponentClickEventKey:
-				cmd = component.UpdateCmd{Type: cmdHandlePadClick, Data: event}
-			}
+// onComponentClick handles component click events
+func (c *PadGridComponent) onComponentClick(event events.Event) {
+	e := event.(events.ComponentClickEvent)
+	cmd := component.UpdateCmd{Type: cmdHandlePadClick, Data: e}
+	c.SendUpdate(cmd)
+}
 
-			if cmd.Type != 0 {
-				c.SendUpdate(cmd)
-			}
-		default:
-			return
+func (c *PadGridComponent) onSetPadGridConfig(payload PadGridConfigPayload) {
+	needsReinit := c.rows != payload.Rows ||
+		c.cols != payload.Cols ||
+		c.padSize != payload.PadSize
+	c.rows = payload.Rows
+	c.cols = payload.Cols
+	c.padSize = payload.PadSize
+	if needsReinit {
+		c.initPads()
+		if c.preset != nil {
+			c.applyPresetData()
 		}
 	}
 }
 
-func (c *PadGridComponent) handleUpdate(cmd component.UpdateCmd) {
-	switch ct := cmd.Type.(type) {
-	case component.GlobalCommand:
-		c.Component.HandleGlobalUpdate(cmd)
-		return
+func (c *PadGridComponent) onSetPadGridPreset(newPreset *preset.Preset) {
+	c.preset = newPreset
+	c.applyPresetData()
+}
 
-	case localCommand:
-		switch ct {
-		case cmdSetPadGridConfig:
-			if payload, ok := cmd.Data.(PadGridConfigPayload); ok {
-				needsReinit := c.rows != payload.Rows ||
-					c.cols != payload.Cols ||
-					c.padSize != payload.PadSize
-				c.rows = payload.Rows
-				c.cols = payload.Cols
-				c.padSize = payload.PadSize
-				if needsReinit {
-					c.initPads()
-					if c.preset != nil {
-						c.applyPresetData()
-					}
-				}
+func (c *PadGridComponent) onHandlePadClick(event events.ComponentClickEvent) {
+	// Listens for clicks from the global bus
+	if clickedPad, ok := event.Data.(*pad.PadComponent); ok {
+		isMyPad := false
+		for _, p := range c.pads {
+			if p == clickedPad {
+				isMyPad = true
+				break
 			}
-
-		case cmdSetPadGridPreset:
-			if newPreset, ok := cmd.Data.(*preset.Preset); ok {
-				c.preset = newPreset
-				c.applyPresetData()
-			}
-
-		case cmdHandlePadClick:
-			// Listens for clicks from the global bus
-			if event, ok := cmd.Data.(events.MouseEventRecord); ok {
-				if clickedPad, ok := event.Data.(*pad.PadComponent); ok {
-					isMyPad := false
-					for _, p := range c.pads {
-						if p == clickedPad {
-							isMyPad = true
-							break
-						}
-					}
-
-					if isMyPad {
-						// Clear the last published pad pointer to allow re-triggering
-						c.lastPublishedPadPtr = nil
-						c.selectedPad = clickedPad
-					}
-				}
-			}
-		default:
-			log.Warn(
-				"PadGridComponent unhandled local command",
-				zap.String("id", c.IDStr()),
-				zap.Any("cmd", cmd),
-			)
 		}
-		return
 
-	default:
-		log.Warn(
-			"PadGridComponent unhandled update type",
-			zap.String("id", c.IDStr()),
-			zap.Any("type", fmt.Sprintf("%T", cmd.Type)),
-		)
+		if isMyPad {
+			// Clear the last published pad pointer to allow re-triggering
+			c.lastPublishedPadPtr = nil
+			c.selectedPad = clickedPad
+		}
 	}
 }
 
@@ -263,42 +229,46 @@ func (c *PadGridComponent) Pads() []*pad.PadComponent {
 func (c *PadGridComponent) SetRows(rows int) *PadGridComponent {
 	payload := PadGridConfigPayload{Rows: rows, Cols: c.cols, PadSize: c.padSize}
 	cmd := component.UpdateCmd{Type: cmdSetPadGridConfig, Data: payload}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *PadGridComponent) SetCols(cols int) *PadGridComponent {
 	payload := PadGridConfigPayload{Rows: c.rows, Cols: cols, PadSize: c.padSize}
 	cmd := component.UpdateCmd{Type: cmdSetPadGridConfig, Data: payload}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *PadGridComponent) SetPadSize(size int) *PadGridComponent {
 	payload := PadGridConfigPayload{Rows: c.rows, Cols: c.cols, PadSize: size}
 	cmd := component.UpdateCmd{Type: cmdSetPadGridConfig, Data: payload}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *PadGridComponent) SetPreset(preset *preset.Preset) *PadGridComponent {
 	cmd := component.UpdateCmd{Type: cmdSetPadGridPreset, Data: preset}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 // Destroy cleans up any subscriptions before removal
 func (c *PadGridComponent) Destroy() {
-	eventbus.Bus.Unsubscribe(events.ComponentClickEventKey, c.UUID())
+	// Unsubscribe from all events
+	c.EventRouter.Destroy()
+
 	for _, p := range c.pads {
 		p.Destroy()
 	}
 	c.pads = nil
+
+	// Call the base component's destroy method
 	c.Component.Destroy()
 }
 
 func (c *PadGridComponent) Layout() {
-	c.drainEvents()
+	c.EventRouter.ProcessEvents()
 
 	c.Component.ProcessUpdates()
 
@@ -321,10 +291,9 @@ func (c *PadGridComponent) Layout() {
 
 	// Only publish event if the selected pad has changed
 	if selected != nil && selected != c.lastPublishedPadPtr {
-		eventbus.Bus.Publish(events.PadGridEventRecord{
-			EventType: events.PadGridSelectEvent,
-			Pad:       selected,
-			OwnerID:   c.ownerID,
+		eventbus.Bus.Publish(events.PadGridSelectEvent{
+			Pad:     selected,
+			OwnerID: c.ownerID,
 		})
 		c.lastPublishedPadPtr = selected
 	}

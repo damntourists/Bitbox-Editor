@@ -27,6 +27,8 @@ var log = logging.NewLogger("presetlist")
 
 type PresetListWindow struct {
 	*window.Window[*PresetListWindow]
+	eventbus.EventRouter
+	component.CommandRouter
 
 	// Child Components
 	Components struct {
@@ -38,8 +40,6 @@ type PresetListWindow struct {
 	selectedPreset *preset.Preset
 	presetLocation *storage.StorageLocation
 	loading        bool
-
-	filteredEventSub *eventbus.FilteredSubscription
 }
 
 func NewPresetListWindow() *PresetListWindow {
@@ -50,7 +50,7 @@ func NewPresetListWindow() *PresetListWindow {
 		loading:        false,
 	}
 
-	w.Window = window.NewWindow[*PresetListWindow]("Presets", "ListMusic", w.handleUpdate)
+	w.Window = window.NewWindow[*PresetListWindow]("Presets", "ListMusic")
 	w.SetFlags(imgui.WindowFlagsMenuBar)
 	w.Window.SetLayoutBuilder(w)
 
@@ -69,114 +69,78 @@ func NewPresetListWindow() *PresetListWindow {
 				),
 		)
 
-	bus := eventbus.Bus
 	uuid := w.UUID()
 
-	// Create filtered subscription for all events
-	w.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 20)
-	w.filteredEventSub.SubscribeMultiple(
-		bus,
-		events.StorageActivatedEventKey,
-		events.ComponentClickEventKey,
-	)
+	w.EventRouter.Init(uuid)
+	w.OnEvent(events.StorageActivatedEventKey, w.onStorageActivated)
+	w.OnEvent(events.ComponentClickEventKey, w.onRowClick)
+
+	w.CommandRouter.Init(w.Window)
+	component.OnCommandTyped(&w.CommandRouter, cmdPresetListSetLocation, w.onSetLocation)
+	component.OnCommandTyped(&w.CommandRouter, cmdPresetListSetLoading, w.onSetLoading)
+	component.OnCommandTyped(&w.CommandRouter, cmdPresetListUpdateList, w.onUpdateList)
+	component.OnCommandTyped(&w.CommandRouter, cmdPresetListSetSelected, w.onSetSelected)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleRowClick, w.onHandleRowClick)
 
 	return w
 }
 
-// drainEvents translates global bus events into local commands
-func (w *PresetListWindow) drainEvents() {
-	if w.filteredEventSub != nil {
-		for {
-			select {
-			case event := <-w.filteredEventSub.Events():
-				var cmd component.UpdateCmd
-				switch event.Type() {
-				case events.StorageActivatedEventKey:
-					cmd = component.UpdateCmd{Type: cmdPresetListSetLocation, Data: event}
-				case events.ComponentClickEventKey:
-					cmd = component.UpdateCmd{Type: cmdHandleRowClick, Data: event}
-				}
-				if cmd.Type != 0 {
-					w.SendUpdate(cmd)
-				}
-			default:
-				// No more events
-				return
-			}
+func (w *PresetListWindow) onStorageActivated(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdPresetListSetLocation, Data: event})
+}
+
+func (w *PresetListWindow) onRowClick(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleRowClick, Data: event})
+}
+
+func (w *PresetListWindow) onSetLocation(event events.StorageActivatedEvent) {
+	if loc, ok := event.Location.(*storage.StorageLocation); ok {
+		if w.presetLocation == nil || w.presetLocation.Path != loc.Path {
+			w.presetLocation = loc
+			w.presets = nil
+			w.selectedPreset = nil
+			w.rebuildTableRows()
+			w.startScan()
 		}
 	}
 }
 
-func (w *PresetListWindow) handleUpdate(cmd component.UpdateCmd) {
-	if w.Window.HandleGlobalUpdate(cmd) {
-		return
+func (w *PresetListWindow) onSetLoading(isLoading bool) {
+	w.loading = isLoading
+}
+
+func (w *PresetListWindow) onUpdateList(newList []*preset.Preset) {
+	w.presets = newList
+	foundSelected := false
+	if w.selectedPreset != nil {
+		for _, p := range w.presets {
+			if p == w.selectedPreset {
+				foundSelected = true
+				break
+			}
+		}
 	}
+	if !foundSelected {
+		w.selectedPreset = nil
+	}
+	w.rebuildTableRows()
+}
 
-	switch cmd.Type {
-	case cmdPresetListSetLocation:
-		if event, ok := cmd.Data.(events.StorageEventRecord); ok {
-			if loc, ok := event.Data.(*storage.StorageLocation); ok {
-				if w.presetLocation == nil || w.presetLocation.Path != loc.Path {
-					w.presetLocation = loc
-					w.presets = nil
-					w.selectedPreset = nil
-					w.rebuildTableRows()
-					w.startScan()
-				}
-			}
+func (w *PresetListWindow) onSetSelected(p *preset.Preset) {
+	if w.selectedPreset != p {
+		w.selectedPreset = p
+		w.rebuildTableRows()
+	}
+}
+
+func (w *PresetListWindow) onHandleRowClick(event events.ComponentClickEvent) {
+	if p, ok := event.Data.(*preset.Preset); ok {
+		w.SendUpdate(component.UpdateCmd{Type: cmdPresetListSetSelected, Data: p})
+		if event.IsDoubleClick {
+			eventbus.Bus.Publish(events.PresetLoadEvent{
+				Preset: p,
+			})
 		}
-
-	case cmdPresetListSetLoading:
-		if isLoading, ok := cmd.Data.(bool); ok {
-			w.loading = isLoading
-		}
-
-	case cmdPresetListUpdateList:
-		if newList, ok := cmd.Data.([]*preset.Preset); ok {
-			w.presets = newList
-			foundSelected := false
-			if w.selectedPreset != nil {
-				for _, p := range w.presets {
-					if p == w.selectedPreset {
-						foundSelected = true
-						break
-					}
-				}
-			}
-			if !foundSelected {
-				w.selectedPreset = nil
-			}
-			w.rebuildTableRows()
-		}
-
-	case cmdPresetListSetSelected:
-		if p, ok := cmd.Data.(*preset.Preset); ok {
-			if w.selectedPreset != p {
-				w.selectedPreset = p
-				w.rebuildTableRows()
-			}
-		} else if cmd.Data == nil {
-			if w.selectedPreset != nil {
-				w.selectedPreset = nil
-				w.rebuildTableRows()
-			}
-		}
-
-	case cmdHandleRowClick:
-		if event, ok := cmd.Data.(events.MouseEventRecord); ok {
-			if p, ok := event.Data.(*preset.Preset); ok {
-				w.SendUpdate(component.UpdateCmd{Type: cmdPresetListSetSelected, Data: p})
-				if event.EventType == events.ComponentDoubleClickedEvent {
-					eventbus.Bus.Publish(events.PresetEventRecord{
-						EventType: events.PresetLoadEvent,
-						Data:      p,
-					})
-				}
-			}
-		}
-
-	default:
-		log.Warn("PresetListWindow unhandled update", zap.Any("cmd", cmd))
 	}
 }
 
@@ -262,7 +226,7 @@ func (w *PresetListWindow) Menu() {
 }
 
 func (w *PresetListWindow) Layout() {
-	w.drainEvents()
+	w.EventRouter.ProcessEvents()
 	w.Window.ProcessUpdates()
 
 	isLoading := w.loading
@@ -285,10 +249,8 @@ func (w *PresetListWindow) Layout() {
 }
 
 func (w *PresetListWindow) Destroy() {
-	// Unsubscribe from filtered subscriptions
-	if w.filteredEventSub != nil {
-		w.filteredEventSub.Unsubscribe()
-	}
+	// Unsubscribe from all events
+	w.EventRouter.Destroy()
 
 	// Destroy child components
 	if w.Components.PresetTable != nil {

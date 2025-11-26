@@ -15,13 +15,13 @@ import (
 	"fmt"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("combobox")
 
 type ComboBoxComponent struct {
 	*component.Component[*ComboBoxComponent]
+	component.CommandRouter
 
 	label   string
 	preview string
@@ -39,34 +39,36 @@ func NewComboBoxComponent(id imgui.ID, label string) *ComboBoxComponent {
 		items:    make([]string, 0),
 		preview:  "",
 	}
-	cmp.Component = component.NewComponent[*ComboBoxComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*ComboBoxComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetComboBoxItems, cmp.onSetItems)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetComboBoxSelected, cmp.onSetSelected)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetComboBoxPreview, cmp.onSetPreview)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetComboBoxFlags, cmp.onSetFlags)
 
 	return cmp
 }
 
-func (c *ComboBoxComponent) handleUpdate(cmd component.UpdateCmd) {
-	if c.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (c *ComboBoxComponent) onSetItems(items []string) {
+	c.items = items
+}
 
-	switch cmd.Type {
-	case cmdSetComboBoxItems:
-		c.items = cmd.Data.([]string)
-	case cmdSetComboBoxSelected:
-		newIndex := cmd.Data.(int32)
-		c.selected = newIndex
-		// Update preview text when selection changes
-		if newIndex >= 0 && int(newIndex) < len(c.items) {
-			c.preview = fmt.Sprintf("%s %s", font.Icon("Grid3x2"), c.items[c.selected])
-		}
-	case cmdSetComboBoxPreview:
-		c.preview = cmd.Data.(string)
-	case cmdSetComboBoxFlags:
-		c.flags = cmd.Data.(imgui.ComboFlags)
-	default:
-		log.Warn("ComboBoxComponent unhandled update", zap.String("id", c.IDStr()), zap.Any("cmd", cmd))
+func (c *ComboBoxComponent) onSetSelected(newIndex int32) {
+	c.selected = newIndex
+	// Update preview text when selection changes
+	if newIndex >= 0 && int(newIndex) < len(c.items) {
+		c.preview = fmt.Sprintf("%s %s", font.Icon("Grid3x2"), c.items[c.selected])
 	}
+}
+
+func (c *ComboBoxComponent) onSetPreview(preview string) {
+	c.preview = preview
+}
+
+func (c *ComboBoxComponent) onSetFlags(flags imgui.ComboFlags) {
+	c.flags = flags
 }
 
 func (c *ComboBoxComponent) Selected() int32 {
@@ -87,7 +89,7 @@ func (c *ComboBoxComponent) Flags() imgui.ComboFlags {
 
 func (c *ComboBoxComponent) SetFlags(flags imgui.ComboFlags) *ComboBoxComponent {
 	cmd := component.UpdateCmd{Type: cmdSetComboBoxFlags, Data: flags}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
@@ -98,13 +100,13 @@ func (c *ComboBoxComponent) SetSelected(selected int32) *ComboBoxComponent {
 
 func (c *ComboBoxComponent) SetItems(items []string) *ComboBoxComponent {
 	cmd := component.UpdateCmd{Type: cmdSetComboBoxItems, Data: items}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *ComboBoxComponent) SetPreview(preview string) *ComboBoxComponent {
 	cmd := component.UpdateCmd{Type: cmdSetComboBoxPreview, Data: preview}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
@@ -132,10 +134,9 @@ func (c *ComboBoxComponent) Layout() {
 			if imgui.SelectableBool(fmt.Sprintf("%s##%d", item, i)) {
 				c.SendUpdate(component.UpdateCmd{Type: cmdSetComboBoxSelected, Data: int32(i)})
 
-				eventbus.Bus.Publish(events.ComboboxEventRecord{
-					EventType: events.ComboboxSelectionChangeEvent,
-					UUID:      c.UUID(),
-					Selected:  item,
+				eventbus.Bus.Publish(events.ComboboxSelectionChangeEvent{
+					UUID:     c.UUID(),
+					Selected: item,
 				})
 			}
 

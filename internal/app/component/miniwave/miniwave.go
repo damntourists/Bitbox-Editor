@@ -11,7 +11,6 @@ import (
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/AllenDang/cimgui-go/implot"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("miniwave")
@@ -27,8 +26,10 @@ type WaveformLine struct {
 // MiniWaveformComponent displays a small, non-interactive waveform
 type MiniWaveformComponent struct {
 	*component.Component[*MiniWaveformComponent]
+	eventbus.EventRouter
+	component.CommandRouter
 
-	path string // The file path this component represents
+	path string
 
 	isReady              bool
 	loadFailed           bool
@@ -38,8 +39,6 @@ type MiniWaveformComponent struct {
 	lastCachedColormap   implot.Colormap
 	normalizeFactor      float32
 	lastCacheRequestTime float64
-
-	filteredEventSub *eventbus.FilteredSubscription
 }
 
 // NewMiniWaveform creates a new waveform component
@@ -56,41 +55,27 @@ func NewMiniWaveform(id imgui.ID, path string) *MiniWaveformComponent {
 		lastCacheRequestTime: 0.0,
 	}
 
-	cmp.Component = component.NewComponent[*MiniWaveformComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*MiniWaveformComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	// Subscribe to all load events using filtered subscription
-	bus := eventbus.Bus
-	uuid := cmp.UUID()
-	cmp.filteredEventSub = eventbus.NewFilteredSubscription(uuid, 10)
-	cmp.filteredEventSub.SubscribeMultiple(
-		bus,
-		events.AudioMetadataLoadedKey,
-		events.AudioSamplesLoadedKey,
-		events.AudioLoadFailedKey,
-	)
+	cmp.EventRouter.Init(cmp.UUID())
+	cmp.OnEvent(events.AudioMetadataLoadedKey, cmp.onAudioLoadEvent)
+	cmp.OnEvent(events.AudioSamplesLoadedKey, cmp.onAudioLoadEvent)
+	cmp.OnEvent(events.AudioLoadFailedKey, cmp.onAudioLoadEvent)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	cmp.OnCommand(cmdUpdateStateFromCache, cmp.onUpdateStateFromCache)
 
 	return cmp
 }
 
-// drainEvents reads from the event bus subscription channel and translates relevant events into local commands.
-func (mw *MiniWaveformComponent) drainEvents() {
-	if mw.filteredEventSub != nil {
-		for {
-			select {
-			case event := <-mw.filteredEventSub.Events():
-				// Check if it's an audio load event
-				if e, ok := event.(events.AudioLoadEventRecord); ok {
-					// Check if it's for the file this component cares about
-					if e.Path == mw.path {
-						mw.SendUpdate(component.UpdateCmd{Type: cmdUpdateStateFromCache})
-					}
-				}
-			default:
-				// No more events
-				return
-			}
-		}
+// onAudioLoadEvent handles all audio load events (metadata, samples, failed)
+func (mw *MiniWaveformComponent) onAudioLoadEvent(event events.Event) {
+	e := event.(events.AudioLoadEventRecord)
+
+	// Check if it's for the file this component cares about
+	if e.Path == mw.path {
+		mw.SendUpdate(component.UpdateCmd{Type: cmdUpdateStateFromCache})
 	}
 }
 
@@ -127,19 +112,9 @@ func (mw *MiniWaveformComponent) ProcessUpdates() {
 	mw.Component.ProcessUpdates()
 }
 
-func (mw *MiniWaveformComponent) handleUpdate(cmd component.UpdateCmd) {
-	if mw.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
-
-	switch cmd.Type {
-	case cmdUpdateStateFromCache:
-		// This is triggered by an event from the event bus
-		mw.updateStateFromCache()
-
-	default:
-		log.Warn("Unhandled update", zap.String("id", mw.IDStr()), zap.Any("cmd", cmd))
-	}
+func (mw *MiniWaveformComponent) onUpdateStateFromCache(cmd component.UpdateCmd) {
+	// This is triggered by an event from the event bus
+	mw.updateStateFromCache()
 }
 
 // buildCache generates WaveformLines from the downsample data
@@ -316,7 +291,7 @@ func (mw *MiniWaveformComponent) renderFromCache(width, height float32) {
 }
 
 func (mw *MiniWaveformComponent) Layout() {
-	mw.drainEvents()
+	mw.EventRouter.ProcessEvents()
 	mw.ProcessUpdates()
 
 	// On first render, check cache and request load if needed
@@ -418,10 +393,8 @@ func (mw *MiniWaveformComponent) renderPlaceholder(width, height float32) {
 
 // Destroy cleans up the component
 func (mw *MiniWaveformComponent) Destroy() {
-	// Unsubscribe from filtered subscriptions (handles all event types)
-	if mw.filteredEventSub != nil {
-		mw.filteredEventSub.Unsubscribe()
-	}
+	// Unsubscribe from all events
+	mw.EventRouter.Destroy()
 
 	// Call the base component's destroy method
 	mw.Component.Destroy()

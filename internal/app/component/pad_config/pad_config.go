@@ -16,28 +16,25 @@ import (
 	"sync"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("pad_config")
 
 type PadConfigComponent struct {
 	*component.Component[*PadConfigComponent]
+	eventbus.EventRouter
+	component.CommandRouter
 
 	pad    *pad.PadComponent
 	preset *preset.Preset
 
 	table *table.TableComponent
-
-	eventSub chan events.Event
 }
 
 func NewPadConfigComponent(id imgui.ID, p *preset.Preset) *PadConfigComponent {
-	cmp := &PadConfigComponent{
-		eventSub: make(chan events.Event, 10),
-	}
+	cmp := &PadConfigComponent{}
 
-	cmp.Component = component.NewComponent[*PadConfigComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*PadConfigComponent](id)
 
 	cmp.table = table.NewTableComponent(imgui.IDStr(fmt.Sprintf("table-%s", cmp.UUID()))).
 		SetNoHeader(false).
@@ -58,61 +55,32 @@ func NewPadConfigComponent(id imgui.ID, p *preset.Preset) *PadConfigComponent {
 
 	cmp.Component.SetLayoutBuilder(cmp)
 
-	// Subscribe to pad grid selection events
-	eventbus.Bus.Subscribe(events.PadGridSelectKey, cmp.UUID(), cmp.eventSub)
+	cmp.EventRouter.Init(cmp.UUID())
+	cmp.OnEvent(events.PadGridSelectKey, cmp.onPadSelect)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadConfigPad, cmp.onSetPad)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetPadConfigPreset, cmp.onSetPreset)
 
 	return cmp
 }
 
-// drainEvents translates global bus events into local commands
-func (c *PadConfigComponent) drainEvents() {
-	for {
-		select {
-		case event := <-c.eventSub:
-			// We only subscribe to PadGridSelectKey
-			if e, ok := event.(events.PadGridEventRecord); ok {
-				c.SendUpdate(component.UpdateCmd{Type: cmdSetPadConfigPad, Data: e.Pad})
-			}
-		default:
-			// No more events
-			return
-		}
-	}
+// onPadSelect handles pad selection events
+func (c *PadConfigComponent) onPadSelect(event events.Event) {
+	e := event.(events.PadGridSelectEvent)
+	c.SendUpdate(component.UpdateCmd{Type: cmdSetPadConfigPad, Data: e.Pad})
 }
 
-func (c *PadConfigComponent) handleUpdate(cmd component.UpdateCmd) {
-	if c.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (c *PadConfigComponent) onSetPad(pad *pad.PadComponent) {
+	c.pad = pad
+	// Rebuild the table on pad change
+	c.rebuildTableRows()
+}
 
-	switch cmd.Type {
-	case cmdSetPadConfigPad:
-		// Allow nil pad
-		if cmd.Data == nil {
-			c.pad = nil
-		} else if pad, ok := cmd.Data.(*pad.PadComponent); ok {
-			c.pad = pad
-		} else {
-			log.Warn("Invalid data type for cmdSetPadConfigPad", zap.Any("data", cmd.Data))
-		}
-		// Rebuild the table on pad change
-		c.rebuildTableRows()
-
-	case cmdSetPadConfigPreset:
-		// Allow nil preset
-		if cmd.Data == nil {
-			c.preset = nil
-		} else if p, ok := cmd.Data.(*preset.Preset); ok {
-			c.preset = p
-		} else {
-			log.Warn("Invalid data type for cmdSetPadConfigPreset", zap.Any("data", cmd.Data))
-		}
-		// Rebuild the table on preset change
-		c.rebuildTableRows()
-
-	default:
-		log.Warn("PadConfigComponent unhandled update", zap.String("id", c.IDStr()), zap.Any("cmd", cmd))
-	}
+func (c *PadConfigComponent) onSetPreset(preset *preset.Preset) {
+	c.preset = preset
+	// Rebuild the table on preset change
+	c.rebuildTableRows()
 }
 
 // rebuildTableRows finds the correct cell and builds the table rows for it
@@ -201,18 +169,18 @@ func (c *PadConfigComponent) rebuildTableRows() {
 
 func (c *PadConfigComponent) SetPad(pad *pad.PadComponent) *PadConfigComponent {
 	cmd := component.UpdateCmd{Type: cmdSetPadConfigPad, Data: pad}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *PadConfigComponent) SetPreset(preset *preset.Preset) *PadConfigComponent {
 	cmd := component.UpdateCmd{Type: cmdSetPadConfigPreset, Data: preset}
-	c.Component.SendUpdate(cmd)
+	c.SendUpdate(cmd)
 	return c
 }
 
 func (c *PadConfigComponent) Layout() {
-	c.drainEvents()
+	c.EventRouter.ProcessEvents()
 	c.Component.ProcessUpdates()
 
 	if c.preset == nil {
@@ -230,8 +198,8 @@ func (c *PadConfigComponent) Layout() {
 
 // Destroy cleans up the component
 func (c *PadConfigComponent) Destroy() {
-	// Unsubscribe from the event bus
-	eventbus.Bus.Unsubscribe(events.PadGridSelectKey, c.UUID())
+	// Unsubscribe from all events
+	c.EventRouter.Destroy()
 
 	// Destroy child components
 	if c.table != nil {

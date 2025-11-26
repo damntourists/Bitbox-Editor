@@ -9,10 +9,6 @@ type DummyComponent struct {
 	size imgui.Vec2
 }
 
-func (dc *DummyComponent) handleUpdate(cmd UpdateCmd) {
-	dc.Component.HandleGlobalUpdate(cmd)
-}
-
 func (dc *DummyComponent) Layout() {
 	dc.Component.ProcessUpdates()
 	imgui.Dummy(dc.Component.size)
@@ -20,7 +16,7 @@ func (dc *DummyComponent) Layout() {
 
 func NewDummy() *DummyComponent {
 	cmp := &DummyComponent{}
-	cmp.Component = NewComponent[*DummyComponent](imgui.IDStr("##dummy"), cmp.handleUpdate)
+	cmp.Component = NewComponent[*DummyComponent](imgui.IDStr("##dummy"))
 	cmp.Component.SetLayoutBuilder(cmp)
 	return cmp
 }

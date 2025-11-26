@@ -73,135 +73,202 @@ type BitboxEditor struct {
 
 	initialized bool
 
-	updates  chan UpdateCmd
-	handler  UpdateHandlerFunc
-	eventSub chan events.Event
+	updates         chan UpdateCmd
+	commandHandlers map[any]func(UpdateCmd)
+	eventRouter     eventbus.EventRouter
 }
 
 func NewBitboxEditor() *BitboxEditor {
 	app := &BitboxEditor{
-		uuid:        uuid.NewString(),
-		initialized: false,
-		updates:     make(chan UpdateCmd, 50),
-		eventSub:    make(chan events.Event, 100),
+		uuid:            uuid.NewString(),
+		initialized:     false,
+		updates:         make(chan UpdateCmd, 50),
+		commandHandlers: make(map[any]func(UpdateCmd)),
 	}
-	app.handler = app.handleUpdate
+
+	app.eventRouter.Init(app.uuid)
+	app.eventRouter.OnEvent(events.PresetLoadEventKey, func(event events.Event) {
+		if e, ok := event.(events.PresetLoadEvent); ok {
+			app.onPresetLoadEvent(e)
+		}
+	})
+
+	app.eventRouter.OnEvent(events.StorageActivatedEventKey, func(event events.Event) {
+		if e, ok := event.(events.StorageActivatedEvent); ok {
+			app.onStorageActivatedEvent(e)
+		}
+	})
+
+	app.eventRouter.OnEvent(events.StorageDeselectedEventKey, func(event events.Event) {
+		if e, ok := event.(events.StorageDeselectedEvent); ok {
+			app.onStorageDeselectedEvent(e)
+		}
+	})
+
+	app.eventRouter.OnEvent(events.AudioVolumeChangedKey, func(event events.Event) {
+		if e, ok := event.(events.AudioVolumeChangedEvent); ok {
+			app.onAudioVolumeChangedEvent(e)
+		}
+	})
+
+	app.eventRouter.OnEvent(events.WindowCloseEventKey, func(event events.Event) {
+		if e, ok := event.(events.WindowCloseEvent); ok {
+			app.onWindowCloseEvent(e)
+		}
+	})
+
+	app.eventRouter.OnEvent(events.WindowDestroyEventKey, func(event events.Event) {
+		if e, ok := event.(events.WindowDestroyEvent); ok {
+			app.onWindowDestroyEvent(e)
+		}
+	})
+
+	app.RegisterCommandHandler(cmdEditorCreate, func(cmd UpdateCmd) {
+		if payload, ok := cmd.Data.(editorCreatePayload); ok {
+			app.onEditorCreate(payload)
+		}
+	})
+	app.RegisterCommandHandler(cmdEditorAdd, func(cmd UpdateCmd) {
+		if payload, ok := cmd.Data.(editorAddPayload); ok {
+			app.onEditorAdd(payload)
+		}
+	})
+	app.RegisterCommandHandler(cmdEditorRemove, func(cmd UpdateCmd) {
+		if payload, ok := cmd.Data.(editorRemovePayload); ok {
+			app.onEditorRemove(payload)
+		}
+	})
+
 	app.setup()
 
 	font.InitAndRebuildFonts(app.backend)
 	font.SetGlobalScale(1)
-	//font.RebuildFonts()
 
 	return app
 }
 
-// drainEvents translates global bus events into local commands
-func (b *BitboxEditor) drainEvents() {
-	for {
-		select {
-		case event := <-b.eventSub:
-			// Translate *all* public events into a command
-			// The event struct itself is the "Type"
-			b.SendUpdate(UpdateCmd{Type: event, Data: event})
-		default:
-			// No more events
+// RegisterCommandHandler implements the interface needed for CommandRouter compatibility
+func (b *BitboxEditor) RegisterCommandHandler(cmdType any, handler func(UpdateCmd)) {
+	b.commandHandlers[cmdType] = handler
+}
+
+// HandleGlobalUpdate implements the interface needed for CommandRouter compatibility
+func (b *BitboxEditor) HandleGlobalUpdate(cmd UpdateCmd) bool {
+	// No global commands like components, so this always returns false
+	return false
+}
+
+// handleUpdate dispatches commands to registered handlers
+func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
+	// Try handler lookup first
+	if handler, ok := b.commandHandlers[cmd.Type]; ok {
+		handler(cmd)
+		return
+	}
+
+	// Try type string lookup for events
+	typeKey := fmt.Sprintf("%T", cmd.Type)
+	if handler, ok := b.commandHandlers[typeKey]; ok {
+		handler(cmd)
+		return
+	}
+
+	log.Warn("Unhandled update type", zap.Any("type", fmt.Sprintf("%T", cmd.Type)))
+}
+
+func (b *BitboxEditor) onEditorCreate(payload editorCreatePayload) {
+	if payload.Preset == nil {
+		return
+	}
+
+	p := payload.Preset
+	// Check if editor already exists for this preset
+	for _, win := range b.Window.Editors {
+		if win != nil && win.Preset() == p {
+			imgui.SetWindowFocusStr(win.Title())
 			return
 		}
 	}
+	audioMgr := audio.GetAudioManager()
+	editWindow := presetedit.NewPresetEditWindow(p, audioMgr)
+	b.Window.Editors = append(b.Window.Editors, editWindow)
 }
 
-// handleUpdate is the main command processor for the app
-func (b *BitboxEditor) handleUpdate(cmd UpdateCmd) {
-	switch c := cmd.Type.(type) {
+func (b *BitboxEditor) onEditorAdd(payload editorAddPayload) {
+	if payload.Editor != nil {
+		b.Window.Editors = append(b.Window.Editors, payload.Editor)
+	}
+}
 
-	case localCommand:
-		switch c {
-		case cmdEditorCreate:
-			if payload, ok := cmd.Data.(editorCreatePayload); ok && payload.Preset != nil {
-				p := payload.Preset
-				for _, win := range b.Window.Editors {
-					if win != nil && win.Preset() == p {
-						imgui.SetWindowFocusStr(win.Title())
-						return
-					}
-				}
-				audioMgr := audio.GetAudioManager()
-				editWindow := presetedit.NewPresetEditWindow(p, audioMgr)
-				b.Window.Editors = append(b.Window.Editors, editWindow)
-			}
-
-		case cmdEditorAdd:
-			if payload, ok := cmd.Data.(editorAddPayload); ok && payload.Editor != nil {
-				b.Window.Editors = append(b.Window.Editors, payload.Editor)
-			}
-
-		case cmdEditorRemove:
-			if payload, ok := cmd.Data.(editorRemovePayload); ok && payload.Editor != nil {
-				newEditors := b.Window.Editors[:0]
-				removed := false
-				for _, editor := range b.Window.Editors {
-					if editor != payload.Editor {
-						newEditors = append(newEditors, editor)
-					} else {
-						editor.Destroy()
-						removed = true
-					}
-				}
-				if removed {
-					b.Window.Editors = newEditors
-				}
-			}
-		}
+func (b *BitboxEditor) onEditorRemove(payload editorRemovePayload) {
+	if payload.Editor == nil {
 		return
+	}
 
-	case events.PresetEventRecord:
-		if c.EventType == events.PresetLoadEvent {
-			if p, ok := c.Data.(*preset.Preset); ok && p != nil {
-				log.Debug("App received LoadPreset event, creating editor", zap.String("preset", p.Name))
-				b.SendUpdate(UpdateCmd{
-					Type: cmdEditorCreate,
-					Data: editorCreatePayload{Preset: p},
-				})
-			}
+	newEditors := b.Window.Editors[:0]
+	removed := false
+	for _, editor := range b.Window.Editors {
+		if editor != payload.Editor {
+			newEditors = append(newEditors, editor)
+		} else {
+			editor.Destroy()
+			removed = true
 		}
-		return
+	}
+	if removed {
+		b.Window.Editors = newEditors
+	}
+}
 
-	case events.StorageEventRecord:
-		if c.EventType == events.StorageActivatedEvent {
-			if loc, ok := c.Data.(*storage.StorageLocation); ok {
-				log.Debug("App received StorageActivated event", zap.String("path", loc.Path))
-				b.Window.Presets.SetPresetLocation(loc)
-				b.Window.Library.SetStorageLocation(loc)
-			}
+func (b *BitboxEditor) onPresetLoadEvent(e events.PresetLoadEvent) {
+	if p, ok := e.Preset.(*preset.Preset); ok && p != nil {
+		log.Debug("App received LoadPreset event, creating editor", zap.String("preset", p.Name))
+		b.SendUpdate(UpdateCmd{
+			Type: cmdEditorCreate,
+			Data: editorCreatePayload{Preset: p},
+		})
+	}
+}
+
+func (b *BitboxEditor) onStorageActivatedEvent(e events.StorageActivatedEvent) {
+	if loc, ok := e.Location.(*storage.StorageLocation); ok {
+		log.Debug("App received StorageActivated event", zap.String("path", loc.Path))
+		b.Window.Presets.SetPresetLocation(loc)
+		b.Window.Library.SetStorageLocation(loc)
+	}
+}
+
+func (b *BitboxEditor) onStorageDeselectedEvent(e events.StorageDeselectedEvent) {
+	// Currently no action needed when storage is deselected
+}
+
+func (b *BitboxEditor) onAudioVolumeChangedEvent(e events.AudioVolumeChangedEvent) {
+	if b.volumeControl != nil {
+		b.volumeControl.SetVolume(float32(e.Volume))
+	}
+}
+
+func (b *BitboxEditor) onWindowCloseEvent(e events.WindowCloseEvent) {
+	b.handleWindowClose(e.WindowID)
+}
+
+func (b *BitboxEditor) onWindowDestroyEvent(e events.WindowDestroyEvent) {
+	b.handleWindowClose(e.WindowID)
+}
+
+func (b *BitboxEditor) handleWindowClose(windowID string) {
+	var editorToRemove *presetedit.PresetEditWindow
+	for _, editor := range b.Window.Editors {
+		if editor.UUID() == windowID {
+			editorToRemove = editor
+			break
 		}
-		return
-
-	case events.AudioVolumeEventRecord:
-		if b.volumeControl != nil {
-			b.volumeControl.SetVolume(float32(c.Volume))
-		}
-		return
-
-	case events.WindowEventRecord:
-		if c.EventType == events.WindowCloseEvent || c.EventType == events.WindowDestroyEvent {
-			var editorToRemove *presetedit.PresetEditWindow
-			for _, editor := range b.Window.Editors {
-				if editor.UUID() == c.WindowID {
-					editorToRemove = editor
-					break
-				}
-			}
-			if editorToRemove != nil {
-				b.SendUpdate(UpdateCmd{
-					Type: cmdEditorRemove,
-					Data: editorRemovePayload{Editor: editorToRemove},
-				})
-			}
-		}
-		return
-
-	default:
-		log.Warn("BitboxEditor unhandled update type", zap.Any("type", fmt.Sprintf("%T", cmd.Type)))
+	}
+	if editorToRemove != nil {
+		b.SendUpdate(UpdateCmd{
+			Type: cmdEditorRemove,
+			Data: editorRemovePayload{Editor: editorToRemove},
+		})
 	}
 }
 
@@ -292,7 +359,7 @@ func (b *BitboxEditor) initWindows() {
 		SetRadius(4).
 		SetVolume(float32(audioMgr.GetVolume()))
 
-	buttonSize := toolbarSize - 8 // 8 pixels padding
+	buttonSize := toolbarSize - 8
 
 	b.storageButton = button.NewButtonWithID(imgui.IDStr("toolbar_storage"), b.Window.Storage.Icon()).
 		SetFixedSize(buttonSize, buttonSize).
@@ -322,12 +389,6 @@ func (b *BitboxEditor) initWindows() {
 	b.volumeControl.SetOnVolumeChange(func(volume float32) {
 		audioMgr.SetVolume(float64(volume))
 	})
-
-	eventbus.Bus.Subscribe(events.AudioVolumeChangedKey, b.uuid, b.eventSub)
-	eventbus.Bus.Subscribe(events.StorageActivatedEventKey, b.uuid, b.eventSub)
-	eventbus.Bus.Subscribe(events.PresetLoadEventKey, b.uuid, b.eventSub)
-	eventbus.Bus.Subscribe(events.WindowCloseEventKey, b.uuid, b.eventSub)
-	eventbus.Bus.Subscribe(events.WindowDestroyEventKey, b.uuid, b.eventSub)
 }
 
 func (b *BitboxEditor) menu() {
@@ -375,6 +436,7 @@ func (b *BitboxEditor) close() {
 }
 
 func (b *BitboxEditor) onDrop(files []string) {
+	// TODO: Finish this
 	fmt.Println("Dropped files: ", files)
 }
 
@@ -607,7 +669,7 @@ func (b *BitboxEditor) dockspace() {
 }
 
 func (b *BitboxEditor) loop() {
-	b.drainEvents()
+	b.eventRouter.ProcessEvents()
 	b.ProcessUpdates()
 
 	currentEditors := append([]*presetedit.PresetEditWindow(nil), b.Window.Editors...)
@@ -666,33 +728,24 @@ func (b *BitboxEditor) SendUpdate(cmd UpdateCmd) {
 	select {
 	case b.updates <- cmd:
 	default:
-		log.Warn("BitboxEditor update channel full, dropping command")
+		log.Warn("Update channel full, dropping command")
 	}
 }
 
 func (b *BitboxEditor) ProcessUpdates() {
-	if b.handler == nil {
-		for {
-			select {
-			case <-b.updates:
-			default:
-				return
-			}
-		}
-	}
-
 	const maxMessagesPerFrame = 100
 	for i := 0; i < maxMessagesPerFrame; i++ {
 		select {
 		case cmd := <-b.updates:
-			b.handler(cmd)
+			// Direct call to handler dispatcher
+			b.handleUpdate(cmd)
 		default:
 			return
 		}
 	}
 
 	if len(b.updates) > 0 {
-		log.Warn("BitboxEditor ProcessUpdates hit message limit")
+		log.Warn("ProcessUpdates hit message limit")
 	}
 }
 

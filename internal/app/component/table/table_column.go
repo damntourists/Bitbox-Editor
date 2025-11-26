@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 type TableColumnComponent struct {
 	*component.Component[*TableColumnComponent]
+	component.CommandRouter
 	label              string
 	flags              imgui.TableColumnFlags
 	innerWidthOrWeight float32
@@ -27,70 +27,55 @@ func NewTableColumn(label string) *TableColumnComponent {
 	}
 
 	id := imgui.IDStr(fmt.Sprintf("table-column::%s", label))
-	cmp.Component = component.NewComponent[*TableColumnComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*TableColumnComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableColumnFlags, cmp.onSetFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableColumnWidthOrWeight, cmp.onSetWidthOrWeight)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableColumnUserID, cmp.onSetUserID)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableColumnSortFn, cmp.onSetSortFn)
 
 	return cmp
 }
 
-func (tcc *TableColumnComponent) handleUpdate(cmd component.UpdateCmd) {
-	if tcc.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (tcc *TableColumnComponent) onSetFlags(flags imgui.TableColumnFlags) {
+	tcc.flags = flags
+}
 
-	switch cmd.Type {
-	case cmdSetTableColumnFlags:
-		if flags, ok := cmd.Data.(imgui.TableColumnFlags); ok {
-			tcc.flags = flags
-		}
+func (tcc *TableColumnComponent) onSetWidthOrWeight(w float32) {
+	tcc.innerWidthOrWeight = w
+}
 
-	case cmdSetTableColumnWidthOrWeight:
-		if w, ok := cmd.Data.(float32); ok {
-			tcc.innerWidthOrWeight = w
-		}
+func (tcc *TableColumnComponent) onSetUserID(id int32) {
+	tcc.userID = id
+}
 
-	case cmdSetTableColumnUserID:
-		if id, ok := cmd.Data.(int32); ok {
-			tcc.userID = id
-		}
-
-	case cmdSetTableColumnSortFn:
-		if fn, ok := cmd.Data.(SortFunc); ok {
-			tcc.sortFn = fn
-		} else if cmd.Data == nil {
-			tcc.sortFn = nil
-		}
-
-	default:
-		log.Warn(
-			"TableColumnComponent unhandled update",
-			zap.String("id", tcc.IDStr()),
-			zap.Any("cmd", cmd),
-		)
-	}
+func (tcc *TableColumnComponent) onSetSortFn(fn SortFunc) {
+	tcc.sortFn = fn
 }
 
 func (tcc *TableColumnComponent) SetFlags(flags imgui.TableColumnFlags) *TableColumnComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableColumnFlags, Data: flags}
-	tcc.Component.SendUpdate(cmd)
+	tcc.SendUpdate(cmd)
 	return tcc
 }
 
 func (tcc *TableColumnComponent) SetInnerWidthOrWeight(w float32) *TableColumnComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableColumnWidthOrWeight, Data: w}
-	tcc.Component.SendUpdate(cmd)
+	tcc.SendUpdate(cmd)
 	return tcc
 }
 
 func (tcc *TableColumnComponent) SetUserID(id int32) *TableColumnComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableColumnUserID, Data: id}
-	tcc.Component.SendUpdate(cmd)
+	tcc.SendUpdate(cmd)
 	return tcc
 }
 
 func (tcc *TableColumnComponent) SetSortFn(fn SortFunc) *TableColumnComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableColumnSortFn, Data: fn}
-	tcc.Component.SendUpdate(cmd)
+	tcc.SendUpdate(cmd)
 	return tcc
 }
 func (tcc *TableColumnComponent) Layout() {

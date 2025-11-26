@@ -11,13 +11,13 @@ import (
 	"bitbox-editor/internal/logging"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("table")
 
 type TableComponent struct {
 	*component.Component[*TableComponent]
+	component.CommandRouter
 
 	flags imgui.TableFlags
 
@@ -47,61 +47,48 @@ func NewTableComponent(id imgui.ID) *TableComponent {
 		innerWidth:   0,
 	}
 
-	cmp.Component = component.NewComponent[*TableComponent](id, cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*TableComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
+
+	cmp.CommandRouter.Init(cmp.Component)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableFlags, cmp.onSetFlags)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableInnerWidth, cmp.onSetInnerWidth)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableRows, cmp.onSetRows)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableColumns, cmp.onSetColumns)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableFastMode, cmp.onSetFastMode)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableFreeze, cmp.onSetFreeze)
+	component.OnCommandTyped(&cmp.CommandRouter, cmdSetTableNoHeader, cmp.onSetNoHeader)
 
 	return cmp
 }
 
-func (t *TableComponent) handleUpdate(cmd component.UpdateCmd) {
-	if t.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
+func (t *TableComponent) onSetFlags(flags imgui.TableFlags) {
+	t.flags = flags
+}
 
-	switch cmd.Type {
-	case cmdSetTableFlags:
-		if flags, ok := cmd.Data.(imgui.TableFlags); ok {
-			t.flags = flags
-		}
+func (t *TableComponent) onSetInnerWidth(width float64) {
+	t.innerWidth = width
+}
 
-	case cmdSetTableInnerWidth:
-		if width, ok := cmd.Data.(float64); ok {
-			t.innerWidth = width
-		}
+func (t *TableComponent) onSetRows(rows []*TableRowComponent) {
+	t.rows = rows
+}
 
-	case cmdSetTableRows:
-		if rows, ok := cmd.Data.([]*TableRowComponent); ok {
-			t.rows = rows
-		} else if cmd.Data == nil {
-			t.rows = nil
-		}
+func (t *TableComponent) onSetColumns(cols []*TableColumnComponent) {
+	t.columns = cols
+}
 
-	case cmdSetTableColumns:
-		if cols, ok := cmd.Data.([]*TableColumnComponent); ok {
-			t.columns = cols
-		} else if cmd.Data == nil {
-			t.columns = nil
-		}
+func (t *TableComponent) onSetFastMode(mode bool) {
+	t.fastMode = mode
+}
 
-	case cmdSetTableFastMode:
-		if mode, ok := cmd.Data.(bool); ok {
-			t.fastMode = mode
-		}
+func (t *TableComponent) onSetFreeze(payload TableFreezePayload) {
+	t.freezeColumn = payload.Col
+	t.freezeRow = payload.Row
+}
 
-	case cmdSetTableFreeze:
-		if payload, ok := cmd.Data.(TableFreezePayload); ok {
-			t.freezeColumn = payload.Col
-			t.freezeRow = payload.Row
-		}
-
-	case cmdSetTableNoHeader:
-		if noHeader, ok := cmd.Data.(bool); ok {
-			t.noHeader = noHeader
-		}
-
-	default:
-		log.Warn("TableComponent unhandled update", zap.String("id", t.IDStr()), zap.Any("cmd", cmd))
-	}
+func (t *TableComponent) onSetNoHeader(noHeader bool) {
+	t.noHeader = noHeader
 }
 
 func (t *TableComponent) colCount() int {
@@ -135,20 +122,20 @@ func (t *TableComponent) handleSort() {
 
 func (t *TableComponent) SetFastMode(b bool) *TableComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableFastMode, Data: b}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
 func (t *TableComponent) SetNoHeader(b bool) *TableComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableNoHeader, Data: b}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
 func (t *TableComponent) SetFreeze(col, row int) *TableComponent {
 	payload := TableFreezePayload{Col: col, Row: row}
 	cmd := component.UpdateCmd{Type: cmdSetTableFreeze, Data: payload}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
@@ -156,7 +143,7 @@ func (t *TableComponent) SetColumns(cols ...*TableColumnComponent) *TableCompone
 	colsCopy := make([]*TableColumnComponent, len(cols))
 	copy(colsCopy, cols)
 	cmd := component.UpdateCmd{Type: cmdSetTableColumns, Data: colsCopy}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
@@ -164,7 +151,7 @@ func (t *TableComponent) SetRows(rows ...*TableRowComponent) *TableComponent {
 	rowsCopy := make([]*TableRowComponent, len(rows))
 	copy(rowsCopy, rows)
 	cmd := component.UpdateCmd{Type: cmdSetTableRows, Data: rowsCopy}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
@@ -175,13 +162,13 @@ func (t *TableComponent) SetSize(width, height float32) *TableComponent {
 
 func (t *TableComponent) SetInnerWidth(width float64) *TableComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableInnerWidth, Data: width}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 
 func (t *TableComponent) SetFlags(flags imgui.TableFlags) *TableComponent {
 	cmd := component.UpdateCmd{Type: cmdSetTableFlags, Data: flags}
-	t.Component.SendUpdate(cmd)
+	t.SendUpdate(cmd)
 	return t
 }
 

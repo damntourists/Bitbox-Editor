@@ -22,17 +22,10 @@ func NewDynamicText(textGetter func() string) *DynamicTextComponent {
 		wrapped:    false,
 	}
 
-	cmp.Component = component.NewComponent[*DynamicTextComponent](imgui.ID(0), cmp.handleUpdate)
+	cmp.Component = component.NewComponent[*DynamicTextComponent](imgui.ID(0))
 	cmp.Component.SetLayoutBuilder(cmp)
 
 	return cmp
-}
-
-func (dtc *DynamicTextComponent) handleUpdate(cmd component.UpdateCmd) {
-	if dtc.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
-	// No specific update handling needed for now
 }
 
 func (dtc *DynamicTextComponent) SetFont(font *imgui.Font) *DynamicTextComponent {

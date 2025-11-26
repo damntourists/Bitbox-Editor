@@ -21,7 +21,7 @@ import (
 
 var log = logging.NewLogger("window")
 
-var WindowEventChannel = make(chan events.WindowEventRecord, 100)
+var WindowEventChannel = make(chan events.WindowDestroyEvent, 100)
 
 type (
 	Window[T WindowType] struct {
@@ -50,7 +50,12 @@ type (
 	}
 )
 
-func NewWindow[T WindowType](title, icon string, handler UpdateHandlerFunc) *Window[T] {
+func NewWindow[T WindowType](title, icon string, handler ...UpdateHandlerFunc) *Window[T] {
+	var h UpdateHandlerFunc
+	if len(handler) > 0 {
+		h = handler[0]
+	}
+
 	return &Window[T]{
 		uuid:            uuid.NewString(),
 		noClose:         false,
@@ -60,7 +65,7 @@ func NewWindow[T WindowType](title, icon string, handler UpdateHandlerFunc) *Win
 		icon:            icon,
 		flags:           imgui.WindowFlagsNone,
 		updates:         make(chan cmp.UpdateCmd, 100),
-		handler:         handler,
+		handler:         h,
 		commandHandlers: make(map[any]func(UpdateCmd)),
 	}
 }
@@ -134,27 +139,28 @@ func (w *Window[T]) HandleGlobalUpdate(cmd UpdateCmd) bool {
 
 	case CmdWinSetOpen:
 		w.open = cmd.Data.(bool)
-		record := events.WindowEventRecord{
-			EventType:   events.WindowOpenEvent,
-			WindowTitle: w.Title(),
-			WindowID:    w.uuid,
+		if w.open {
+			eventbus.Bus.Publish(events.WindowOpenEvent{
+				WindowTitle: w.Title(),
+				WindowID:    w.uuid,
+			})
+		} else {
+			eventbus.Bus.Publish(events.WindowCloseEvent{
+				WindowTitle: w.Title(),
+				WindowID:    w.uuid,
+			})
 		}
-		if !w.open {
-			record.EventType = events.WindowCloseEvent
-		}
-
-		eventbus.Bus.Publish(record)
 
 		return true
 
 	case CmdWinDestroy:
 		w.destroyed = cmd.Data.(bool)
-		record := events.WindowEventRecord{
-			EventType:   events.WindowDestroyEvent,
+		event := events.WindowDestroyEvent{
 			WindowTitle: w.Title(),
+			WindowID:    w.uuid,
 		}
 		select {
-		case WindowEventChannel <- record:
+		case WindowEventChannel <- event:
 		default:
 			// Channel full, drop event
 		}
@@ -172,12 +178,11 @@ func (w *Window[T]) UpdateChannel() chan<- cmp.UpdateCmd { // Add UpdateChannel
 
 // RegisterCommandHandler registers a handler for a specific command type.
 // Returns the window for method chaining.
-func (w *Window[T]) RegisterCommandHandler(cmdType any, handler func(UpdateCmd)) *Window[T] {
+func (w *Window[T]) RegisterCommandHandler(cmdType any, handler func(UpdateCmd)) {
 	if w.commandHandlers == nil {
 		w.commandHandlers = make(map[any]func(UpdateCmd))
 	}
 	w.commandHandlers[cmdType] = handler
-	return w
 }
 
 // UnregisterCommandHandler removes a handler for a specific command type.

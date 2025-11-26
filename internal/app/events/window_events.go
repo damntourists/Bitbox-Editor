@@ -1,14 +1,5 @@
 package events
 
-type WindowEvent int32
-
-// Window Event Enums
-const (
-	WindowOpenEvent WindowEvent = iota
-	WindowCloseEvent
-	WindowDestroyEvent
-)
-
 // Window Event Keys
 const (
 	WindowOpenEventKey    = "window.open"
@@ -16,28 +7,38 @@ const (
 	WindowDestroyEventKey = "window.destroy"
 )
 
-// WindowEventRecord holds data for a window event.
-type WindowEventRecord struct {
-	// EventType is the enum value (e.g., WindowOpenEvent).
-	EventType WindowEvent
-
-	// WindowTitle is the source window title which produced this event.
+// WindowOpenEvent is published when a window is opened.
+type WindowOpenEvent struct {
+	// WindowTitle is the title of the window that was opened.
 	WindowTitle string
-
-	// WindowID is the source window ID which produced this event.
+	// WindowID is the unique identifier for the window.
 	WindowID string
 }
 
-// Type returns the event type key.
-func (e WindowEventRecord) Type() string {
-	switch e.EventType {
-	case WindowOpenEvent:
-		return WindowOpenEventKey
-	case WindowCloseEvent:
-		return WindowCloseEventKey
-	case WindowDestroyEvent:
-		return WindowDestroyEventKey
-	default:
-		return "window.unknown"
-	}
+func (e WindowOpenEvent) Type() string {
+	return WindowOpenEventKey
+}
+
+// WindowCloseEvent is published when a window is closed.
+type WindowCloseEvent struct {
+	// WindowTitle is the title of the window that was closed.
+	WindowTitle string
+	// WindowID is the unique identifier for the window.
+	WindowID string
+}
+
+func (e WindowCloseEvent) Type() string {
+	return WindowCloseEventKey
+}
+
+// WindowDestroyEvent is published when a window is destroyed.
+type WindowDestroyEvent struct {
+	// WindowTitle is the title of the window that was destroyed.
+	WindowTitle string
+	// WindowID is the unique identifier for the window.
+	WindowID string
+}
+
+func (e WindowDestroyEvent) Type() string {
+	return WindowDestroyEventKey
 }
