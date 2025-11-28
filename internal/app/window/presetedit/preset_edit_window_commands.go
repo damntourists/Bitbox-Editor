@@ -15,8 +15,11 @@ const (
 	cmdHandleGridSizeChange
 	cmdHandleWaveformClick
 	cmdHandleAudioProgress
-	cmdHandleAudioStartStop
-	cmdHandleAudioLoad
+	cmdHandleAudioPlaybackStarted
+	cmdHandleAudioPlaybackPaused
+	cmdHandleAudioPlaybackStopped
+	cmdHandleAudioPlaybackFinished
+	cmdHandleAudioMetadataLoaded
 )
 
 type activeWavePayload struct {

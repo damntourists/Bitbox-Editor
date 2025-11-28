@@ -60,7 +60,6 @@ type Component[T ComponentType] struct {
 
 	// UI Update request channel
 	updates chan UpdateCmd
-	handler UpdateHandlerFunc
 
 	// Command handler registry for custom commands
 	commandHandlers map[any]func(UpdateCmd)
@@ -106,12 +105,7 @@ type Component[T ComponentType] struct {
 	colormap      implot.Colormap
 }
 
-func NewComponent[T ComponentType](id imgui.ID, handler ...UpdateHandlerFunc) *Component[T] {
-	var h UpdateHandlerFunc
-	if len(handler) > 0 {
-		h = handler[0]
-	}
-
+func NewComponent[T ComponentType](id imgui.ID) *Component[T] {
 	return &Component[T]{
 		id:              id,
 		uuid:            uuid.NewString(),
@@ -119,7 +113,6 @@ func NewComponent[T ComponentType](id imgui.ID, handler ...UpdateHandlerFunc) *C
 		previousState:   events.ItemStateNone,
 		dragDropData:    nil,
 		updates:         make(chan UpdateCmd, 500),
-		handler:         h,
 		commandHandlers: make(map[any]func(UpdateCmd)),
 		animState:       make(map[UpdateCmdType]*animStateData),
 		enabled:         true,
@@ -270,19 +263,6 @@ func (c *Component[T]) SendUpdate(cmd UpdateCmd) {
 
 // ProcessUpdates drains the component's update channel and calls its handler.
 func (c *Component[T]) ProcessUpdates() {
-	// If no handlers are set, still process global commands
-	if c.handler == nil && len(c.commandHandlers) == 0 {
-		for i := 0; i < maxMessagesPerFrame; i++ {
-			select {
-			case cmd := <-c.updates:
-				c.HandleGlobalUpdate(cmd)
-			default:
-				return
-			}
-		}
-		return
-	}
-
 	// Limit the number of messages processed per frame
 	for i := 0; i < maxMessagesPerFrame; i++ {
 		select {
@@ -290,9 +270,6 @@ func (c *Component[T]) ProcessUpdates() {
 			// Try registered handlers first
 			if handler, ok := c.commandHandlers[cmd.Type]; ok {
 				handler(cmd)
-			} else if c.handler != nil {
-				// TODO: Update all other components to use new method above, method below is legacy
-				c.handler(cmd)
 			} else {
 				// No local handler found, try global commands
 				c.HandleGlobalUpdate(cmd)

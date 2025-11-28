@@ -58,7 +58,7 @@ func NewTreeRow(id imgui.ID, components ...component.ComponentType) *TreeRowComp
 		layout:   layout,
 		children: make([]*TreeRowComponent, 0),
 	}
-	cmp.Component = component.NewComponent[*TreeRowComponent](id, nil)
+	cmp.Component = component.NewComponent[*TreeRowComponent](id)
 	cmp.Component.SetLayoutBuilder(cmp)
 	return cmp
 }

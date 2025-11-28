@@ -244,16 +244,9 @@ func (am *AudioManager) PlayWave(wave *WaveFile, loop bool, startMarker, endMark
 		}
 	}
 
-	eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-		EventType:       events.AudioPlaybackStartedEvent,
-		Path:            wave.Path,
-		Progress:        0.0,
-		PositionSamples: seekPosition,
-		DurationSamples: waveEndMarker - waveStartMarker,
-		IsPlaying:       true,
-		IsPaused:        false,
-		OwnerID:         ownerID,
-	})
+	eventbus.Bus.Publish(events.NewAudioPlaybackStartedEvent(
+		wave.Path, ownerID, 0.0, seekPosition, waveEndMarker-waveStartMarker, false,
+	))
 
 	go am.monitorPlaybackProgress(wave.Path, progressStreamer)
 
@@ -289,12 +282,7 @@ func (am *AudioManager) monitorPlaybackProgress(path string, progressStream *Pro
 		stillPlaying := currentStream == progressStream && currentStream != nil
 
 		if !stillPlaying {
-			eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-				EventType: events.AudioPlaybackStoppedEvent,
-				Path:      path,
-				IsPlaying: false,
-				OwnerID:   ownerID,
-			})
+			eventbus.Bus.Publish(events.NewAudioPlaybackStoppedEvent(path, ownerID, 0, 0, 0))
 			return
 		}
 
@@ -311,13 +299,7 @@ func (am *AudioManager) monitorPlaybackProgress(path string, progressStream *Pro
 			region := am.GetPlaybackRegion(path)
 			loopEnabled := region != nil && region.LoopEnabled
 
-			eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-				EventType:   events.AudioPlaybackFinishedEvent,
-				Path:        path,
-				LoopEnabled: loopEnabled,
-				IsPlaying:   false,
-				OwnerID:     ownerID,
-			})
+			eventbus.Bus.Publish(events.NewAudioPlaybackFinishedEvent(path, ownerID, loopEnabled))
 
 			return
 		}
@@ -326,16 +308,9 @@ func (am *AudioManager) monitorPlaybackProgress(path string, progressStream *Pro
 		now := time.Now()
 		if now.Sub(lastPublishTime) >= 33*time.Millisecond {
 			lastPublishTime = now
-			eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-				EventType:       events.AudioPlaybackProgressEvent,
-				Path:            path,
-				Progress:        progress,
-				PositionSamples: position,
-				DurationSamples: totalSamples,
-				IsPlaying:       true,
-				IsPaused:        false,
-				OwnerID:         ownerID,
-			})
+			eventbus.Bus.Publish(events.NewAudioPlaybackProgressEvent(
+				path, ownerID, progress, position, totalSamples,
+			))
 		}
 	}
 }
@@ -370,16 +345,7 @@ func (am *AudioManager) StopCurrent() {
 	}
 
 	// Emit stopped event
-	eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-		EventType:       events.AudioPlaybackStoppedEvent,
-		Path:            path,
-		IsPlaying:       false,
-		IsPaused:        false,
-		Progress:        0,
-		PositionSamples: 0,
-		DurationSamples: 0,
-		OwnerID:         ownerID,
-	})
+	eventbus.Bus.Publish(events.NewAudioPlaybackStoppedEvent(path, ownerID, 0, 0, 0))
 }
 
 func (am *AudioManager) PauseCurrent() {
@@ -442,16 +408,9 @@ func (am *AudioManager) PauseCurrent() {
 	}
 
 	// Emit paused event
-	eventbus.Bus.Publish(events.AudioPlaybackEventRecord{
-		EventType:       events.AudioPlaybackPausedEvent,
-		Path:            path,
-		IsPlaying:       false,
-		IsPaused:        true,
-		Progress:        progress,
-		PositionSamples: currentPos,
-		DurationSamples: boundsEnd - boundsStart,
-		OwnerID:         ownerID,
-	})
+	eventbus.Bus.Publish(events.NewAudioPlaybackPausedEvent(
+		path, ownerID, progress, currentPos, boundsEnd-boundsStart,
+	))
 }
 
 func (am *AudioManager) CurrentWave() *WaveFile {

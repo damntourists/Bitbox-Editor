@@ -27,18 +27,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type UpdateCmd = component.UpdateCmd
-type UpdateCmdType = component.UpdateCmdType
-type localCommand int
-
-const (
-	cmdLibSetStorageLoc localCommand = iota
-	cmdLibSetScanning
-	cmdLibSetFSTree
-	cmdLibSetTreeRows
-	cmdLibSetSearchQuery
-)
-
 var log = logging.NewLogger("library")
 
 // hashString returns a simple hash of a string for use as an ImGui ID
@@ -248,7 +236,7 @@ func (w *LibraryWindow) startScan() {
 		return
 	}
 
-	cmd := UpdateCmd{Type: cmdLibSetScanning, Data: true}
+	cmd := component.UpdateCmd{Type: cmdLibSetScanning, Data: true}
 	w.SendUpdate(cmd)
 
 	path := w.storageLoc.Path
@@ -269,7 +257,7 @@ func (w *LibraryWindow) startScan() {
 				Error: err,
 			})
 
-			doneCmd := UpdateCmd{Type: cmdLibSetScanning, Data: false}
+			doneCmd := component.UpdateCmd{Type: cmdLibSetScanning, Data: false}
 			w.SendUpdate(doneCmd)
 		} else {
 			log.Debug(
@@ -285,10 +273,10 @@ func (w *LibraryWindow) startScan() {
 				},
 			)
 
-			treeCmd := UpdateCmd{Type: cmdLibSetFSTree, Data: tree}
+			treeCmd := component.UpdateCmd{Type: cmdLibSetFSTree, Data: tree}
 			w.SendUpdate(treeCmd)
 
-			doneCmd := UpdateCmd{Type: cmdLibSetScanning, Data: false}
+			doneCmd := component.UpdateCmd{Type: cmdLibSetScanning, Data: false}
 			w.SendUpdate(doneCmd)
 		}
 	}()

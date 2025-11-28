@@ -11,6 +11,7 @@ import (
 	"bitbox-editor/internal/app/theme"
 	"bitbox-editor/internal/app/window/console"
 	"bitbox-editor/internal/app/window/library"
+	"bitbox-editor/internal/app/window/midiconsole"
 	"bitbox-editor/internal/app/window/presetedit"
 	"bitbox-editor/internal/app/window/presetlist"
 	"bitbox-editor/internal/app/window/settings"
@@ -18,6 +19,7 @@ import (
 	"bitbox-editor/internal/audio"
 	"bitbox-editor/internal/config"
 	"bitbox-editor/internal/logging"
+	"bitbox-editor/internal/midi"
 	"bitbox-editor/internal/preset"
 	"bitbox-editor/internal/util"
 	"fmt"
@@ -46,12 +48,13 @@ type BitboxEditor struct {
 	uuid        string
 
 	Window struct {
-		Settings *settings.SettingsWindow
-		Console  *console.ConsoleWindow
-		Storage  *storage.StorageWindow
-		Presets  *presetlist.PresetListWindow
-		Library  *library.LibraryWindow
-		Editors  []*presetedit.PresetEditWindow
+		Settings    *settings.SettingsWindow
+		Console     *console.ConsoleWindow
+		Storage     *storage.StorageWindow
+		Presets     *presetlist.PresetListWindow
+		Library     *library.LibraryWindow
+		MidiConsole *midiconsole.MidiConsoleWindow
+		Editors     []*presetedit.PresetEditWindow
 	}
 
 	Modal struct{}
@@ -60,10 +63,11 @@ type BitboxEditor struct {
 	volumeControl    *volume.VolumeControlComponent
 
 	// Toolbar buttons
-	storageButton *button.Button
-	presetsButton *button.Button
-	consoleButton *button.Button
-	libraryButton *button.Button
+	storageButton     *button.Button
+	presetsButton     *button.Button
+	consoleButton     *button.Button
+	libraryButton     *button.Button
+	midiConsoleButton *button.Button
 
 	canvas *canvas.RenderPrimitive
 
@@ -335,15 +339,14 @@ func (b *BitboxEditor) initWindows() {
 	)
 
 	audioMgr := audio.GetAudioManager()
-	// TODO: Finish building out midi manager.
-	//midiMgr := midi.GetMidiManager()
-	//log.Info("midi ports:", zap.Any("ports", midiMgr.ListPorts()))
+	midiMgr := midi.GetMidiManager()
 
 	b.Window.Settings = settings.NewSettingsWindow()
 	b.Window.Console = console.NewConsoleWindow()
 	b.Window.Storage = storage.NewStorageWindow()
 	b.Window.Presets = presetlist.NewPresetListWindow()
 	b.Window.Library = library.NewLibraryWindow()
+	b.Window.MidiConsole = midiconsole.NewMidiConsoleWindow(midiMgr)
 
 	b.Window.Editors = make([]*presetedit.PresetEditWindow, 0)
 
@@ -385,6 +388,12 @@ func (b *BitboxEditor) initWindows() {
 		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
 		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
 		SetOnClick(func() { b.Window.Library.ToggleOpen() })
+
+	b.midiConsoleButton = button.NewButtonWithID(imgui.IDStr("toolbar_midiconsole"), b.Window.MidiConsole.Icon()).
+		SetFixedSize(buttonSize, buttonSize).
+		SetPadding(theme.GetCurrentTheme().Style.FramePadding[0]).
+		SetRounding(theme.GetCurrentTheme().Style.FrameRounding * 1.9).
+		SetOnClick(func() { b.Window.MidiConsole.ToggleOpen() })
 
 	b.volumeControl.SetOnVolumeChange(func(volume float32) {
 		audioMgr.SetVolume(float64(volume))
@@ -520,6 +529,7 @@ func (b *BitboxEditor) toolbar() {
 	b.presetsButton.SetToggled(b.Window.Presets.IsOpen())
 	b.consoleButton.SetToggled(b.Window.Console.IsOpen())
 	b.libraryButton.SetToggled(b.Window.Library.IsOpen())
+	b.midiConsoleButton.SetToggled(b.Window.MidiConsole.IsOpen())
 
 	if isVertical {
 		// Vertical toolbar layout (left/right)
@@ -531,6 +541,7 @@ func (b *BitboxEditor) toolbar() {
 		b.presetsButton.Build()
 		b.consoleButton.Build()
 		b.libraryButton.Build()
+		b.midiConsoleButton.Build()
 
 		if b.spectrumAnalyzer != nil && b.volumeControl != nil {
 			availHeight := imgui.ContentRegionAvail().Y
@@ -563,6 +574,8 @@ func (b *BitboxEditor) toolbar() {
 		b.consoleButton.Build()
 		imgui.SameLine()
 		b.libraryButton.Build()
+		imgui.SameLine()
+		b.midiConsoleButton.Build()
 		imgui.SameLine()
 
 		if b.spectrumAnalyzer != nil && b.volumeControl != nil {
@@ -713,6 +726,9 @@ func (b *BitboxEditor) loop() {
 	}
 	if b.Window.Library.IsOpen() {
 		b.Window.Library.Build()
+	}
+	if b.Window.MidiConsole.IsOpen() {
+		b.Window.MidiConsole.Build()
 	}
 
 	for _, editWindow := range currentEditors {

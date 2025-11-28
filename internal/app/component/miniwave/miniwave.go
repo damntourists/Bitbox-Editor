@@ -71,10 +71,16 @@ func NewMiniWaveform(id imgui.ID, path string) *MiniWaveformComponent {
 
 // onAudioLoadEvent handles all audio load events (metadata, samples, failed)
 func (mw *MiniWaveformComponent) onAudioLoadEvent(event events.Event) {
-	e := event.(events.AudioLoadEventRecord)
+	// All audio load events embed AudioLoadBase with a Path field
+	type hasPath interface{ GetPath() string }
+
+	pathEvent, ok := event.(hasPath)
+	if !ok {
+		return
+	}
 
 	// Check if it's for the file this component cares about
-	if e.Path == mw.path {
+	if pathEvent.GetPath() == mw.path {
 		mw.SendUpdate(component.UpdateCmd{Type: cmdUpdateStateFromCache})
 	}
 }

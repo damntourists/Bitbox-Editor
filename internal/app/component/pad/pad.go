@@ -14,15 +14,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// TODO: Move to commands file
-type localCommand int
-
-const (
-	cmdSetPadTextLines localCommand = iota
-	cmdSetPadWaveDisplayData
-	cmdSetPadCellDisplayData
-)
-
 var log = logging.NewLogger("pad")
 
 type PadCellDisplayData struct {

@@ -166,12 +166,7 @@ func (c *AsyncWaveCache) loadMetadataSync(path string, baseSnapshot *WaveFileSna
 		snapshot.LoadErr = err
 		c.UpdateSnapshot(path, &snapshot)
 		// Publish fail event
-		eventbus.Bus.Publish(events.AudioLoadEventRecord{
-			EventType: events.AudioLoadFailedEvent,
-			Path:      path,
-			Failed:    true,
-			Error:     err,
-		})
+		eventbus.Bus.Publish(events.NewAudioLoadFailedEvent(path, err))
 		return nil
 	}
 	defer f.Close()
@@ -184,12 +179,7 @@ func (c *AsyncWaveCache) loadMetadataSync(path string, baseSnapshot *WaveFileSna
 		snapshot.LoadErr = err
 		c.UpdateSnapshot(path, &snapshot)
 		// Publish fail event
-		eventbus.Bus.Publish(events.AudioLoadEventRecord{
-			EventType: events.AudioLoadFailedEvent,
-			Path:      path,
-			Failed:    true,
-			Error:     err,
-		})
+		eventbus.Bus.Publish(events.NewAudioLoadFailedEvent(path, err))
 		return nil
 	}
 	streamer.Close()
@@ -207,13 +197,7 @@ func (c *AsyncWaveCache) loadMetadataSync(path string, baseSnapshot *WaveFileSna
 	c.UpdateSnapshot(path, &newSnapshot)
 
 	// Publish metadata loaded event
-	eventbus.Bus.Publish(events.AudioLoadEventRecord{
-		EventType:      events.AudioMetadataLoadedEvent,
-		Path:           path,
-		MetadataLoaded: true,
-		SamplesLoaded:  false,
-		Failed:         false,
-	})
+	eventbus.Bus.Publish(events.NewAudioMetadataLoadedEvent(path))
 
 	return &newSnapshot
 }
@@ -304,12 +288,7 @@ func (c *AsyncWaveCache) loadFullSamplesSync(path string, baseSnapshot *WaveFile
 			zap.String("path", path),
 			zap.Error(err))
 
-		eventbus.Bus.Publish(events.AudioLoadEventRecord{
-			EventType: events.AudioLoadFailedEvent,
-			Path:      path,
-			Failed:    true,
-			Error:     err,
-		})
+		eventbus.Bus.Publish(events.NewAudioLoadFailedEvent(path, err))
 		return
 	}
 	defer f.Close()
@@ -320,12 +299,7 @@ func (c *AsyncWaveCache) loadFullSamplesSync(path string, baseSnapshot *WaveFile
 			zap.String("path", path),
 			zap.Error(err))
 
-		eventbus.Bus.Publish(events.AudioLoadEventRecord{
-			EventType: events.AudioLoadFailedEvent,
-			Path:      path,
-			Failed:    true,
-			Error:     err,
-		})
+		eventbus.Bus.Publish(events.NewAudioLoadFailedEvent(path, err))
 		return
 	}
 	defer streamer.Close()
@@ -381,13 +355,7 @@ func (c *AsyncWaveCache) loadFullSamplesSync(path string, baseSnapshot *WaveFile
 	c.UpdateSnapshot(path, &newSnapshot)
 
 	// Emit samples loaded event
-	eventbus.Bus.Publish(events.AudioLoadEventRecord{
-		EventType:      events.AudioSamplesLoadedEvent,
-		Path:           path,
-		MetadataLoaded: true,
-		SamplesLoaded:  true,
-		Failed:         false,
-	})
+	eventbus.Bus.Publish(events.NewAudioSamplesLoadedEvent(path))
 }
 
 // StreamerFromSnapshot creates a streamer directly from snapshot data

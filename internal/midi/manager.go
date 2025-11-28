@@ -100,7 +100,7 @@ func (m *MidiManager) StopMonitoring() {
 	}
 }
 
-// parseMessage converts a raw midi.Message into a MidiEventRecord.
+// parseMessage converts a raw midi.Message into individual MIDI event types.
 func (m *MidiManager) parseMessage(msg midi.Message, timestampms int32, portID string) events.Event {
 	var ch, key, vel, controller, value, program, pressure uint8
 	var pitch uint16
@@ -110,80 +110,27 @@ func (m *MidiManager) parseMessage(msg midi.Message, timestampms int32, portID s
 	case msg.GetNoteOn(&ch, &key, &vel):
 		// A NoteOn with 0 velocity is often a NoteOff
 		if vel == 0 {
-			return events.MidiEventRecord{
-				EventType: events.MidiNoteOffEvent,
-				Timestamp: timestampms,
-				PortID:    portID,
-				Channel:   ch,
-				Key:       key,
-				Velocity:  0,
-			}
+			return events.NewMidiNoteOffEvent(timestampms, portID, ch, key)
 		}
-		return events.MidiEventRecord{
-			EventType: events.MidiNoteOnEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Key:       key,
-			Velocity:  vel,
-		}
+		return events.NewMidiNoteOnEvent(timestampms, portID, ch, key, vel)
 
 	case msg.GetNoteOff(&ch, &key, &vel):
-		return events.MidiEventRecord{
-			EventType: events.MidiNoteOffEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Key:       key,
-			Velocity:  0,
-		}
+		return events.NewMidiNoteOffEvent(timestampms, portID, ch, key)
 
 	case msg.GetControlChange(&ch, &controller, &value):
-		return events.MidiEventRecord{
-			EventType:  events.MidiControlChangeEvent,
-			Timestamp:  timestampms,
-			PortID:     portID,
-			Channel:    ch,
-			Controller: controller,
-			Value:      value,
-		}
+		return events.NewMidiControlChangeEvent(timestampms, portID, ch, controller, value)
 
 	case msg.GetPitchBend(&ch, &rel, &pitch):
-		return events.MidiEventRecord{
-			EventType: events.MidiPitchBendEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Value14:   pitch,
-		}
+		return events.NewMidiPitchBendEvent(timestampms, portID, ch, pitch)
 
 	case msg.GetProgramChange(&ch, &program):
-		return events.MidiEventRecord{
-			EventType: events.MidiProgramChangeEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Value:     program,
-		}
+		return events.NewMidiProgramChangeEvent(timestampms, portID, ch, program)
 
 	case msg.GetAfterTouch(&ch, &pressure):
-		return events.MidiEventRecord{
-			EventType: events.MidiAfterTouchEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Value:     pressure,
-		}
+		return events.NewMidiAfterTouchEvent(timestampms, portID, ch, pressure)
 
 	case msg.GetPolyAfterTouch(&ch, &key, &pressure):
-		return events.MidiEventRecord{
-			EventType: events.MidiPolyAfterTouchEvent,
-			Timestamp: timestampms,
-			PortID:    portID,
-			Channel:   ch,
-			Key:       key,
-			Velocity:  pressure,
-		}
+		return events.NewMidiPolyAfterTouchEvent(timestampms, portID, ch, key, pressure)
 	}
 
 	return nil

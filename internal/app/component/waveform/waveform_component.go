@@ -101,10 +101,46 @@ func NewWaveformComponent(id imgui.ID) *WaveComponent {
 
 // onPlaybackEvent handles all playback events (progress, started, stopped, finished)
 func (wc *WaveComponent) onPlaybackEvent(event events.Event) {
-	e := event.(events.AudioPlaybackEventRecord)
+	// Events that have AudioPlaybackProgressBase can provide Path, Progress, PositionSamples
+	type hasProgressInfo interface {
+		GetPath() string
+		GetProgress() float64
+		GetPositionSamples() int
+	}
+
+	var path string
+	var isPlaying bool
+	var progress float64
+	var positionSamples int
+
+	// Handle events with progress info
+	if progressEvent, ok := event.(hasProgressInfo); ok {
+		path = progressEvent.GetPath()
+		progress = progressEvent.GetProgress()
+		positionSamples = progressEvent.GetPositionSamples()
+
+		// Determine isPlaying based on event type
+		switch event.(type) {
+		case events.AudioPlaybackProgressEvent,
+			events.AudioPlaybackStartedEvent,
+			events.AudioPlaybackResumedEvent:
+			isPlaying = true
+		case events.AudioPlaybackStoppedEvent,
+			events.AudioPlaybackPausedEvent:
+			isPlaying = false
+		}
+	} else if finishedEvent, ok := event.(events.AudioPlaybackFinishedEvent); ok {
+		// AudioPlaybackFinishedEvent only has AudioPlaybackBase (Path, OwnerID)
+		path = finishedEvent.Path
+		isPlaying = false
+		progress = 1.0
+		positionSamples = 0
+	} else {
+		return
+	}
 
 	// Path filtering - only process events for our audio file
-	if wc.displayData.Path == "" || e.Path != wc.displayData.Path {
+	if wc.displayData.Path == "" || path != wc.displayData.Path {
 		return
 	}
 
@@ -112,9 +148,9 @@ func (wc *WaveComponent) onPlaybackEvent(event events.Event) {
 	cmd := component.UpdateCmd{
 		Type: cmdUpdatePlaybackProgress,
 		Data: PlaybackProgressUpdate{
-			IsPlaying:       e.IsPlaying,
-			Progress:        e.Progress,
-			PositionSeconds: float64(e.PositionSamples) / float64(wc.displayData.SampleRate),
+			IsPlaying:       isPlaying,
+			Progress:        progress,
+			PositionSeconds: float64(positionSamples) / float64(wc.displayData.SampleRate),
 		},
 	}
 	wc.SendUpdate(cmd)

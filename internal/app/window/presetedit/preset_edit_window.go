@@ -231,16 +231,16 @@ func NewPresetEditWindow(p *preset.Preset, audioMgr *audio.AudioManager) *Preset
 
 	w.EventRouter.Init(uuid)
 	w.OnEvent(events.AudioPlaybackProgressKey, w.onAudioProgress)
-	w.OnEvent(events.AudioPlaybackStartedKey, w.onAudioStartStop)
-	w.OnEvent(events.AudioPlaybackPausedKey, w.onAudioStartStop)
-	w.OnEvent(events.AudioPlaybackStoppedKey, w.onAudioStartStop)
-	w.OnEvent(events.AudioPlaybackFinishedKey, w.onAudioStartStop)
+	w.OnEvent(events.AudioPlaybackStartedKey, w.onAudioPlaybackStarted)
+	w.OnEvent(events.AudioPlaybackPausedKey, w.onAudioPlaybackPaused)
+	w.OnEvent(events.AudioPlaybackStoppedKey, w.onAudioPlaybackStopped)
+	w.OnEvent(events.AudioPlaybackFinishedKey, w.onAudioPlaybackFinished)
 	w.OnEvent(events.PadGridSelectKey, w.onPadGridClick)
 	w.OnEvent(events.ComboboxSelectionChangeEventKey, w.onGridSizeChange)
 	w.OnEvent(events.ComponentClickEventKey, w.onWaveformClick)
-	w.OnEvent(events.AudioMetadataLoadedKey, w.onAudioLoad)
-	w.OnEvent(events.AudioSamplesLoadedKey, w.onAudioLoad)
-	w.OnEvent(events.AudioLoadFailedKey, w.onAudioLoad)
+	w.OnEvent(events.AudioMetadataLoadedKey, w.onAudioMetadataLoaded)
+	w.OnEvent(events.AudioSamplesLoadedKey, w.onAudioSamplesLoaded)
+	w.OnEvent(events.AudioLoadFailedKey, w.onAudioLoadFailed)
 	// TODO: Add MIDI event handlers when ready:
 	// w.OnEvent(events.MidiPlaybackNoteOnKey, w.onMidiNoteOn)
 	// w.OnEvent(events.MidiPlaybackNoteOffKey, w.onMidiNoteOff)
@@ -254,117 +254,19 @@ func NewPresetEditWindow(p *preset.Preset, audioMgr *audio.AudioManager) *Preset
 	component.OnCommandTyped(&w.CommandRouter, cmdHandleGridSizeChange, w.onHandleGridSizeChange)
 	component.OnCommandTyped(&w.CommandRouter, cmdHandleWaveformClick, w.onHandleWaveformClick)
 	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioProgress, w.onHandleAudioProgress)
-	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioStartStop, w.onHandleAudioStartStop)
-	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioLoad, w.onHandleAudioLoad)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioPlaybackStarted, w.onHandleAudioPlaybackStarted)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioPlaybackPaused, w.onHandleAudioPlaybackPaused)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioPlaybackStopped, w.onHandleAudioPlaybackStopped)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioPlaybackFinished, w.onHandleAudioPlaybackFinished)
+	component.OnCommandTyped(&w.CommandRouter, cmdHandleAudioMetadataLoaded, w.onHandleAudioMetadataLoaded)
 
 	return w
-}
-
-func (w *PresetEditWindow) onAudioProgress(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioProgress, Data: event})
-}
-
-func (w *PresetEditWindow) onAudioStartStop(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioStartStop, Data: event})
-}
-
-func (w *PresetEditWindow) onPadGridClick(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandlePadGridClick, Data: event})
-}
-
-func (w *PresetEditWindow) onGridSizeChange(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandleGridSizeChange, Data: event})
-}
-
-func (w *PresetEditWindow) onWaveformClick(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandleWaveformClick, Data: event})
-}
-
-func (w *PresetEditWindow) onAudioLoad(event events.Event) {
-	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioLoad, Data: event})
 }
 
 // TODO: Add MIDI event handlers when ready:
 // func (w *PresetEditWindow) onMidiNoteOn(event events.Event) {
 //     w.SendUpdate(component.UpdateCmd{Type: cmdHandleMidiNoteOn, Data: event})
 // }
-
-func (w *PresetEditWindow) onSetPreset(p *preset.Preset) {
-	w.preset = p
-	if w.Components.PadGrid != nil {
-		w.Components.PadGrid.SetPreset(p)
-	}
-	if w.Components.PadConfig != nil {
-		w.Components.PadConfig.SetPreset(p)
-	}
-	w.activeWavePath = ""
-	w.activeWaveData = audio.WaveDisplayData{}
-	if w.Components.Wave != nil {
-		w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
-	}
-	go w.preloadPresetWavs(p)
-}
-
-func (w *PresetEditWindow) onUpdateCachedProgress(progress float64) {
-	if w.playbackState != nil {
-		w.playbackState.SetCursorFromProgress(progress)
-	}
-}
-
-func (w *PresetEditWindow) onUpdateButtonStates(isPlaying bool) {
-	w.updateButtonStates(isPlaying)
-}
-
-func (w *PresetEditWindow) onSetActiveWave(payload activeWavePayload) {
-	if w.previousPadKey != "" && w.Components.Wave != nil {
-		boundsStartSample, boundsEndSample, slicePositions := w.Components.Wave.GetBoundsAndSlices()
-		w.waveformStates[w.previousPadKey] = &WaveformState{
-			BoundsStartSample: boundsStartSample,
-			BoundsEndSample:   boundsEndSample,
-			SlicePositions:    slicePositions,
-		}
-	}
-
-	w.activeWavePath = payload.Path
-	w.activeWaveData = payload.DisplayData
-	if w.Components.Wave != nil {
-		w.Components.Wave.ResetForNewWave()
-		// Restore state for current pad (if previously saved)
-		if savedState, exists := w.waveformStates[w.activePadKey]; exists {
-			isFullRange := savedState.BoundsStartSample == 0 &&
-				savedState.BoundsEndSample >= payload.DisplayData.NumSamples-500
-
-			if isFullRange && len(savedState.SlicePositions) == 0 {
-				cleanDisplayData := payload.DisplayData
-				cleanDisplayData.PlaybackStartMarker = 0
-				cleanDisplayData.PlaybackEndMarker = 0
-				w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
-				w.Components.Wave.ClearSlices()
-			} else {
-				cleanDisplayData := payload.DisplayData
-				cleanDisplayData.PlaybackStartMarker = 0
-				cleanDisplayData.PlaybackEndMarker = 0
-				w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
-				w.Components.Wave.SetBoundsFromSamples(savedState.BoundsStartSample, savedState.BoundsEndSample)
-				if len(savedState.SlicePositions) > 0 {
-					slices := make([]*waveform.WaveMarker, len(savedState.SlicePositions))
-					for i, pos := range savedState.SlicePositions {
-						slices[i] = waveform.NewWaveMarker(pos)
-					}
-					w.Components.Wave.SetSlices(slices)
-				} else {
-					w.Components.Wave.ClearSlices()
-				}
-			}
-		} else {
-			cleanDisplayData := payload.DisplayData
-			cleanDisplayData.PlaybackStartMarker = 0
-			cleanDisplayData.PlaybackEndMarker = 0
-			w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
-			w.Components.Wave.ClearSlices()
-		}
-	}
-}
 
 func (w *PresetEditWindow) onHandlePadGridClick(event events.PadGridSelectEvent) {
 	if pc, ok := event.Pad.(*pad.PadComponent); ok && pc != nil {
@@ -496,10 +398,10 @@ func (w *PresetEditWindow) onHandleWaveformClick(event events.ComponentClickEven
 	}
 }
 
-func (w *PresetEditWindow) onHandleAudioProgress(event events.AudioPlaybackEventRecord) {
+func (w *PresetEditWindow) onHandleAudioProgress(event events.AudioPlaybackProgressEvent) {
 	if event.Path == w.activeWavePath {
 		w.activeWaveData.Progress = event.Progress
-		w.activeWaveData.IsPlaying = event.IsPlaying
+		w.activeWaveData.IsPlaying = true
 		if w.activeWaveData.SampleRate > 0 {
 			w.activeWaveData.PositionSeconds = float64(event.PositionSamples) / float64(w.activeWaveData.SampleRate)
 		}
@@ -508,7 +410,7 @@ func (w *PresetEditWindow) onHandleAudioProgress(event events.AudioPlaybackEvent
 			w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
 		}
 
-		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: event.IsPlaying})
+		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: true})
 	}
 
 	now := time.Now()
@@ -520,7 +422,7 @@ func (w *PresetEditWindow) onHandleAudioProgress(event events.AudioPlaybackEvent
 					displayData := p.GetWaveDisplayData()
 					if displayData.Path != "" {
 						displayData.Progress = event.Progress
-						displayData.IsPlaying = event.IsPlaying
+						displayData.IsPlaying = true
 						p.SetWaveDisplayData(displayData)
 					}
 					break
@@ -530,100 +432,142 @@ func (w *PresetEditWindow) onHandleAudioProgress(event events.AudioPlaybackEvent
 	}
 }
 
-func (w *PresetEditWindow) onHandleAudioStartStop(event events.AudioPlaybackEventRecord) {
-	if event.EventType == events.AudioPlaybackStartedEvent {
-		if event.Path == w.activeWavePath {
-			w.activeWaveData.IsPlaying = true
-			if w.Components.Wave != nil {
-				w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
-			}
-
-			if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
-				w.playbackState.Play()
-				log.Debug("Playback state set to playing", zap.String("path", w.activeWavePath))
-			}
-
-			w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: true})
+func (w *PresetEditWindow) onHandleAudioPlaybackStarted(event events.AudioPlaybackStartedEvent) {
+	if event.Path == w.activeWavePath {
+		w.activeWaveData.IsPlaying = true
+		if w.Components.Wave != nil {
+			w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
 		}
 
-		if w.currentlyPlayingPadPath != "" &&
-			w.currentlyPlayingPadPath != event.Path &&
-			w.Components.PadGrid != nil {
-			for _, pad := range w.Components.PadGrid.Pads() {
-				if pad != nil && pad.GetWavePath() == w.currentlyPlayingPadPath {
-					displayData := pad.GetWaveDisplayData()
-					if displayData.Path != "" {
-						displayData.Progress = 0
-						displayData.IsPlaying = false
-						pad.SetWaveDisplayData(displayData)
-					}
-					break
+		if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
+			w.playbackState.Play()
+			log.Debug("Playback state set to playing", zap.String("path", w.activeWavePath))
+		}
+
+		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: true})
+	}
+
+	// Clear previous pad's display if switching to a different pad
+	if w.currentlyPlayingPadPath != "" &&
+		w.currentlyPlayingPadPath != event.Path &&
+		w.Components.PadGrid != nil {
+		for _, pad := range w.Components.PadGrid.Pads() {
+			if pad != nil && pad.GetWavePath() == w.currentlyPlayingPadPath {
+				displayData := pad.GetWaveDisplayData()
+				if displayData.Path != "" {
+					displayData.Progress = 0
+					displayData.IsPlaying = false
+					pad.SetWaveDisplayData(displayData)
 				}
+				break
 			}
 		}
-		w.currentlyPlayingPadPath = event.Path
+	}
+	w.currentlyPlayingPadPath = event.Path
+}
 
-	} else if event.EventType == events.AudioPlaybackPausedEvent {
-		if event.Path == w.activeWavePath {
-
-			w.activeWaveData.IsPlaying = false
-			if w.Components.Wave != nil {
-				w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
-			}
-
-			if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
-				w.playbackState.IsPlaying = event.IsPlaying
-				w.playbackState.IsPaused = event.IsPaused
-			}
-
-			w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: false})
+func (w *PresetEditWindow) onHandleAudioPlaybackPaused(event events.AudioPlaybackPausedEvent) {
+	if event.Path == w.activeWavePath {
+		w.activeWaveData.IsPlaying = false
+		if w.Components.Wave != nil {
+			w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
 		}
 
-	} else if event.EventType == events.AudioPlaybackStoppedEvent ||
-		event.EventType == events.AudioPlaybackFinishedEvent {
-		if event.Path == w.activeWavePath {
-			isActuallyPlaying := w.audioManager != nil && w.audioManager.IsPlaying() &&
-				w.audioManager.CurrentWave().Path == event.Path
-
-			if !isActuallyPlaying {
-				w.activeWaveData.IsPlaying = false
-				w.activeWaveData.Progress = 0
-				w.activeWaveData.PositionSeconds = 0
-
-				if w.Components.Wave != nil {
-					w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
-				}
-
-				if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
-					w.playbackState.IsPlaying = event.IsPlaying
-					w.playbackState.IsPaused = event.IsPaused
-				}
-			}
-
-			w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: false})
+		if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
+			w.playbackState.IsPlaying = false
+			w.playbackState.IsPaused = true
 		}
 
-		if w.Components.PadGrid != nil {
-			for _, pad := range w.Components.PadGrid.Pads() {
-				if pad != nil && pad.GetWavePath() == event.Path {
-					displayData := pad.GetWaveDisplayData()
-					if displayData.Path != "" {
-						displayData.Progress = 0
-						displayData.IsPlaying = false
-						pad.SetWaveDisplayData(displayData)
-					}
-					break
-				}
-			}
-		}
-		if w.currentlyPlayingPadPath == event.Path {
-			w.currentlyPlayingPadPath = ""
-		}
+		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: false})
 	}
 }
 
-func (w *PresetEditWindow) onHandleAudioLoad(event events.AudioLoadEventRecord) {
-	if event.EventType == events.AudioMetadataLoadedEvent && event.Path == w.activeWavePath {
+func (w *PresetEditWindow) onHandleAudioPlaybackStopped(event events.AudioPlaybackStoppedEvent) {
+	if event.Path == w.activeWavePath {
+		isActuallyPlaying := w.audioManager != nil && w.audioManager.IsPlaying() &&
+			w.audioManager.CurrentWave().Path == event.Path
+
+		if !isActuallyPlaying {
+			w.activeWaveData.IsPlaying = false
+			w.activeWaveData.Progress = 0
+			w.activeWaveData.PositionSeconds = 0
+
+			if w.Components.Wave != nil {
+				w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
+			}
+
+			if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
+				w.playbackState.IsPlaying = false
+				w.playbackState.IsPaused = false
+			}
+		}
+
+		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: false})
+	}
+
+	// Clear pad display when stopped
+	if w.Components.PadGrid != nil {
+		for _, pad := range w.Components.PadGrid.Pads() {
+			if pad != nil && pad.GetWavePath() == event.Path {
+				displayData := pad.GetWaveDisplayData()
+				if displayData.Path != "" {
+					displayData.Progress = 0
+					displayData.IsPlaying = false
+					pad.SetWaveDisplayData(displayData)
+				}
+				break
+			}
+		}
+	}
+	if w.currentlyPlayingPadPath == event.Path {
+		w.currentlyPlayingPadPath = ""
+	}
+}
+
+func (w *PresetEditWindow) onHandleAudioPlaybackFinished(event events.AudioPlaybackFinishedEvent) {
+	if event.Path == w.activeWavePath {
+		isActuallyPlaying := w.audioManager != nil && w.audioManager.IsPlaying() &&
+			w.audioManager.CurrentWave().Path == event.Path
+
+		if !isActuallyPlaying {
+			w.activeWaveData.IsPlaying = false
+			w.activeWaveData.Progress = 0
+			w.activeWaveData.PositionSeconds = 0
+
+			if w.Components.Wave != nil {
+				w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
+			}
+
+			if w.playbackState != nil && w.playbackState.Path == w.activeWavePath {
+				w.playbackState.IsPlaying = true
+				w.playbackState.IsPaused = false
+			}
+		}
+
+		w.SendUpdate(component.UpdateCmd{Type: cmdUpdateButtonStates, Data: false})
+	}
+
+	// Clear pad display when finished
+	if w.Components.PadGrid != nil {
+		for _, pad := range w.Components.PadGrid.Pads() {
+			if pad != nil && pad.GetWavePath() == event.Path {
+				displayData := pad.GetWaveDisplayData()
+				if displayData.Path != "" {
+					displayData.Progress = 0
+					displayData.IsPlaying = false
+					pad.SetWaveDisplayData(displayData)
+				}
+				break
+			}
+		}
+	}
+	if w.currentlyPlayingPadPath == event.Path {
+		w.currentlyPlayingPadPath = ""
+	}
+}
+
+func (w *PresetEditWindow) onHandleAudioMetadataLoaded(event events.AudioMetadataLoadedEvent) {
+	if event.Path == w.activeWavePath {
 		displayData, err := w.audioManager.GetWaveDisplayData(event.Path)
 		if err == nil {
 			if displayData.NumSamples > 0 {
@@ -656,7 +600,566 @@ func (w *PresetEditWindow) onHandleAudioLoad(event events.AudioLoadEventRecord) 
 	}
 }
 
+func (w *PresetEditWindow) onAudioProgress(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioProgress, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioPlaybackStarted(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioPlaybackStarted, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioPlaybackPaused(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioPlaybackPaused, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioPlaybackStopped(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioPlaybackStopped, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioPlaybackFinished(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioPlaybackFinished, Data: event})
+}
+
+func (w *PresetEditWindow) onPadGridClick(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandlePadGridClick, Data: event})
+}
+
+func (w *PresetEditWindow) onGridSizeChange(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleGridSizeChange, Data: event})
+}
+
+func (w *PresetEditWindow) onWaveformClick(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleWaveformClick, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioMetadataLoaded(event events.Event) {
+	w.SendUpdate(component.UpdateCmd{Type: cmdHandleAudioMetadataLoaded, Data: event})
+}
+
+func (w *PresetEditWindow) onAudioSamplesLoaded(event events.Event) {
+	// Currently no action needed for samples loaded
+}
+
+func (w *PresetEditWindow) onAudioLoadFailed(event events.Event) {
+	// Currently no action needed for load failed
+}
+
+func (w *PresetEditWindow) onSetPreset(p *preset.Preset) {
+	w.preset = p
+	if w.Components.PadGrid != nil {
+		w.Components.PadGrid.SetPreset(p)
+	}
+	if w.Components.PadConfig != nil {
+		w.Components.PadConfig.SetPreset(p)
+	}
+	w.activeWavePath = ""
+	w.activeWaveData = audio.WaveDisplayData{}
+	if w.Components.Wave != nil {
+		w.Components.Wave.SetWaveDisplayData(w.activeWaveData)
+	}
+	go w.preloadPresetWavs(p)
+}
+
+func (w *PresetEditWindow) onUpdateCachedProgress(progress float64) {
+	if w.playbackState != nil {
+		w.playbackState.SetCursorFromProgress(progress)
+	}
+}
+
+func (w *PresetEditWindow) onUpdateButtonStates(isPlaying bool) {
+	w.updateButtonStates(isPlaying)
+}
+
+func (w *PresetEditWindow) onSetActiveWave(payload activeWavePayload) {
+	if w.previousPadKey != "" && w.Components.Wave != nil {
+		boundsStartSample, boundsEndSample, slicePositions := w.Components.Wave.GetBoundsAndSlices()
+		w.waveformStates[w.previousPadKey] = &WaveformState{
+			BoundsStartSample: boundsStartSample,
+			BoundsEndSample:   boundsEndSample,
+			SlicePositions:    slicePositions,
+		}
+	}
+
+	w.activeWavePath = payload.Path
+	w.activeWaveData = payload.DisplayData
+	if w.Components.Wave != nil {
+		w.Components.Wave.ResetForNewWave()
+		// Restore state for current pad (if previously saved)
+		if savedState, exists := w.waveformStates[w.activePadKey]; exists {
+			isFullRange := savedState.BoundsStartSample == 0 &&
+				savedState.BoundsEndSample >= payload.DisplayData.NumSamples-500
+
+			if isFullRange && len(savedState.SlicePositions) == 0 {
+				cleanDisplayData := payload.DisplayData
+				cleanDisplayData.PlaybackStartMarker = 0
+				cleanDisplayData.PlaybackEndMarker = 0
+				w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
+				w.Components.Wave.ClearSlices()
+			} else {
+				cleanDisplayData := payload.DisplayData
+				cleanDisplayData.PlaybackStartMarker = 0
+				cleanDisplayData.PlaybackEndMarker = 0
+				w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
+				w.Components.Wave.SetBoundsFromSamples(savedState.BoundsStartSample, savedState.BoundsEndSample)
+				if len(savedState.SlicePositions) > 0 {
+					slices := make([]*waveform.WaveMarker, len(savedState.SlicePositions))
+					for i, pos := range savedState.SlicePositions {
+						slices[i] = waveform.NewWaveMarker(pos)
+					}
+					w.Components.Wave.SetSlices(slices)
+				} else {
+					w.Components.Wave.ClearSlices()
+				}
+			}
+		} else {
+			cleanDisplayData := payload.DisplayData
+			cleanDisplayData.PlaybackStartMarker = 0
+			cleanDisplayData.PlaybackEndMarker = 0
+			w.Components.Wave.SetWaveDisplayData(cleanDisplayData)
+			w.Components.Wave.ClearSlices()
+		}
+	}
+}
+
+func (w *PresetEditWindow) onPlayFromStart() {
+	if w.audioManager == nil || w.activeWavePath == "" {
+		return
+	}
+
+	if !w.ensurePlaybackState() {
+		return
+	}
+
+	boundsStartSample, boundsEndSample, _ := w.Components.Wave.GetBoundsAndSlices()
+	w.playbackState.SliceIdx = 0
+
+	go func(startMarker, endMarker int, path string) {
+		w.audioManager.ClearCursorPosition(path)
+		if err := w.audioManager.PlayWaveByPath(path, false, startMarker, endMarker); err != nil {
+			log.Debug("Play wave failed (may still be loading)", zap.Error(err))
+		}
+	}(boundsStartSample, boundsEndSample, w.activeWavePath)
+}
+
+func (w *PresetEditWindow) onPlayPause() {
+	// Logic is in updateButtonStates
+}
+
+func (w *PresetEditWindow) onStop() {
+	if !w.ensurePlaybackState() {
+		return
+	}
+
+	w.playbackState.Stop()
+
+	go func(path string, state *audio.PlaybackState) {
+		w.audioManager.StopCurrent()
+		// Set cursor position from state
+		progress := state.GetCursorProgress()
+		w.audioManager.SetCursorPositionByPath(path, progress, state.BoundsStart, state.BoundsEnd)
+	}(w.activeWavePath, w.playbackState)
+}
+
+func (w *PresetEditWindow) onSkipBack() {
+	if !w.ensurePlaybackState() || len(w.playbackState.SlicePositions) == 0 {
+		return
+	}
+
+	currentSliceStart, _, _ := w.playbackState.GetPlaybackRegion()
+	atSliceStart := (w.playbackState.CursorPosition - currentSliceStart) < int(2.0*w.playbackState.SamplesPerBin)
+
+	// Determine target slice
+	var targetSliceIdx int
+	if atSliceStart {
+		targetSliceIdx = w.playbackState.SliceIdx - 1
+		if targetSliceIdx < 0 {
+			targetSliceIdx = len(w.playbackState.SlicePositions)
+		}
+	} else {
+		// Not at start - restart current slice
+		targetSliceIdx = w.playbackState.SliceIdx
+	}
+
+	if err := w.playbackState.NavigateToSlice(targetSliceIdx); err != nil {
+		log.Error("Failed to navigate to slice", zap.Error(err))
+		return
+	}
+
+	w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
+
+	if w.audioManager != nil && w.audioManager.IsPlaying() {
+		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
+			log.Error("Failed to apply state after skip back", zap.Error(err))
+		}
+	} else {
+		// Not playing - update audio manager cursor
+		progress := w.playbackState.GetCursorProgress()
+		w.audioManager.SetCursorPositionByPath(
+			w.activeWavePath,
+			progress,
+			w.playbackState.BoundsStart,
+			w.playbackState.BoundsEnd,
+		)
+	}
+}
+
+func (w *PresetEditWindow) onSkipForward() {
+	if !w.ensurePlaybackState() || len(w.playbackState.SlicePositions) == 0 {
+		return
+	}
+
+	nextSliceIdx := w.playbackState.SliceIdx + 1
+	if nextSliceIdx > len(w.playbackState.SlicePositions) {
+		nextSliceIdx = 0
+	}
+
+	if err := w.playbackState.NavigateToSlice(nextSliceIdx); err != nil {
+		log.Error("Failed to navigate to slice", zap.Error(err))
+		return
+	}
+
+	w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
+
+	if w.audioManager != nil && w.audioManager.IsPlaying() {
+		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
+			log.Error("Failed to apply state after skip forward", zap.Error(err))
+		}
+	} else {
+		// Not playing - update audio manager cursor
+		progress := w.playbackState.GetCursorProgress()
+		w.audioManager.SetCursorPositionByPath(
+			w.activeWavePath,
+			progress,
+			w.playbackState.BoundsStart,
+			w.playbackState.BoundsEnd,
+		)
+	}
+}
+
+func (w *PresetEditWindow) onRepeat() {
+	if !w.ensurePlaybackState() {
+		return
+	}
+
+	if w.audioManager != nil && w.audioManager.IsPlaying() {
+		currentPos := w.audioManager.GetCurrentAbsolutePosition()
+		if currentPos >= 0 {
+			w.playbackState.CursorPosition = currentPos
+		}
+	}
+
+	newMode := (w.playbackState.RepeatMode + 1) % 3
+	w.playbackState.SetRepeatMode(audio.RepeatMode(newMode))
+
+	if w.Components.Wave != nil {
+		w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
+	}
+
+	if w.audioManager != nil && w.audioManager.IsPlaying() {
+		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
+			log.Error("Failed to apply new repeat mode", zap.Error(err))
+		}
+	}
+}
+
+// ensurePlaybackState ensures playback state exists with valid bounds
+func (w *PresetEditWindow) ensurePlaybackState() bool {
+	if w.activeWavePath == "" || w.Components.Wave == nil {
+		return false
+	}
+
+	boundsStart, boundsEnd, slicePositions := w.Components.Wave.GetBoundsAndSlices()
+	samplesPerBin := w.Components.Wave.GetSamplesPerBin()
+
+	// Check if bounds are valid
+	if boundsEnd <= boundsStart {
+		return false
+	}
+
+	// Create new playback state if needed, or update existing one
+	if w.playbackState == nil || w.playbackState.Path != w.activeWavePath {
+		w.playbackState = audio.NewPlaybackState(w.activeWavePath, boundsStart, boundsEnd)
+		// Tag with this window's UUID
+		w.playbackState.OwnerID = w.UUID()
+	}
+
+	// Update state with current UI values
+	w.playbackState.UpdateBoundsAndSlices(boundsStart, boundsEnd, slicePositions, samplesPerBin)
+
+	w.syncPlaybackStateToAudioManager()
+
+	return true
+}
+
+// syncPlaybackStateToAudioManager updates the audio manager's stored playback state
+func (w *PresetEditWindow) syncPlaybackStateToAudioManager() {
+	if w.audioManager == nil || w.playbackState == nil {
+		return
+	}
+
+	// Only sync if audio is currently playing and matches our active wave
+	if w.audioManager.IsPlaying() && w.playbackState.Path == w.activeWavePath {
+		// Get the stored playback state from audio manager to compare
+		storedState, exists := w.audioManager.GetPlaybackStateByPath(w.playbackState.Path)
+
+		// Check if slices have actually changed
+		slicesChanged := false
+		if !exists || storedState == nil {
+			slicesChanged = len(w.playbackState.SlicePositions) > 0
+		} else {
+			// Compare slice counts and positions
+			if len(storedState.SlicePositions) != len(w.playbackState.SlicePositions) {
+				slicesChanged = true
+			} else {
+				// Same count, check if positions differ
+				for i := range w.playbackState.SlicePositions {
+					if storedState.SlicePositions[i] != w.playbackState.SlicePositions[i] {
+						slicesChanged = true
+						break
+					}
+				}
+			}
+		}
+
+		w.audioManager.StorePlaybackState(w.playbackState)
+
+		if slicesChanged && w.playbackState.RepeatMode == audio.RepeatModeSlice {
+			currentPos := w.audioManager.GetCurrentAbsolutePosition()
+			if currentPos >= 0 {
+				w.playbackState.CursorPosition = currentPos
+			}
+
+			// Restart playback with updated state
+			_ = w.audioManager.PlayWithState(w.playbackState)
+		}
+	}
+}
+
+// onGeneratePeaks generates slice markers based on peak detection
+func (w *PresetEditWindow) onGeneratePeaks() {
+	if w.activeWavePath == "" || w.audioManager == nil {
+		log.Warn("Cannot generate peaks: no active wave")
+		return
+	}
+
+	// Detect peaks using the current threshold
+	peaks, err := w.audioManager.DetectPeaksForWave(w.activeWavePath, w.peakThreshold)
+	if err != nil {
+		log.Error("Failed to detect peaks", zap.Error(err))
+		return
+	}
+
+	if len(peaks) == 0 {
+		log.Info("No peaks detected with current threshold",
+			zap.Float32("threshold", w.peakThreshold))
+		return
+	}
+
+	// Convert peak positions to WaveMarker objects
+	slices := make([]*waveform.WaveMarker, len(peaks))
+	for i, peakPos := range peaks {
+		slices[i] = waveform.NewWaveMarker(peakPos)
+	}
+
+	// Apply peaks as slice markers to the waveform
+	if w.Components.Wave != nil {
+		w.Components.Wave.SetSlices(slices)
+	}
+}
+
+// updateButtonStates updates button text, enabled state, and colors based on playback state
+func (w *PresetEditWindow) updateButtonStates(isPlaying bool) {
+	// TODO: Rethink this, it's getting messy
+
+	t := theme.GetCurrentTheme()
+
+	if isPlaying {
+		w.Components.PlayPauseButton.
+			SetText(font.Icon("Pause")).
+			SetOnClick(func() {
+				if w.audioManager != nil && w.playbackState != nil {
+					// Get current position before pausing
+					currentPos := w.audioManager.GetCurrentAbsolutePosition()
+					// Update playback state
+					w.playbackState.Pause(currentPos)
+					// Pause audio
+					w.audioManager.PauseCurrent()
+				}
+			})
+	} else {
+		w.Components.PlayPauseButton.
+			SetText(font.Icon("Play")).
+			SetOnClick(func() {
+				if w.audioManager != nil && w.activeWavePath != "" {
+					// Ensure playback state is initialized with valid bounds
+					if !w.ensurePlaybackState() {
+						return
+					}
+
+					boundsStartSample, boundsEndSample, slicePositions := w.Components.Wave.GetBoundsAndSlices()
+
+					if len(slicePositions) > 0 {
+						samplesPerBin := w.Components.Wave.GetSamplesPerBin()
+
+						if samplesPerBin == 0 {
+							return
+						}
+
+						boundsRange := float64(boundsEndSample - boundsStartSample)
+						boundsStartBin := float64(boundsStartSample) / samplesPerBin
+						currentProgress := float64(0)
+
+						if w.playbackState != nil {
+							currentProgress = w.playbackState.GetCursorProgress()
+						}
+
+						isPaused := currentProgress > 0
+						if isPaused {
+							currentSample := currentProgress * boundsRange
+							currentBin := (float64(boundsStartSample) + currentSample) / samplesPerBin
+							currentSliceIdx := 0
+							for i := 0; i < len(slicePositions); i++ {
+								if currentBin >= slicePositions[i]-0.5 {
+									currentSliceIdx = i + 1
+								}
+							}
+							sliceIdx := 0
+							if w.playbackState != nil {
+								sliceIdx = w.playbackState.SliceIdx
+							}
+							if currentSliceIdx != sliceIdx {
+								var sliceStartBin float64
+								if sliceIdx > 0 && sliceIdx <= len(slicePositions) {
+									sliceStartBin = slicePositions[sliceIdx-1]
+								} else {
+									sliceStartBin = boundsStartBin
+								}
+								sliceStartSample := sliceStartBin * samplesPerBin
+								relativeSliceSample := sliceStartSample - float64(boundsStartSample)
+								sliceProgress := relativeSliceSample / boundsRange
+								w.audioManager.SetCursorPositionByPath(
+									w.activeWavePath,
+									sliceProgress,
+									boundsStartSample,
+									boundsEndSample,
+								)
+							}
+						} else if w.playbackState != nil && w.playbackState.RepeatMode == 2 {
+							var sliceStartBin float64
+							boundsStartBin := float64(boundsStartSample) / samplesPerBin
+							sliceIdx := w.playbackState.SliceIdx
+
+							if sliceIdx > 0 && sliceIdx <= len(slicePositions) {
+								sliceStartBin = slicePositions[sliceIdx-1]
+							} else {
+								sliceStartBin = boundsStartBin
+							}
+
+							sliceStartSample := sliceStartBin * samplesPerBin
+							relativeSliceSample := sliceStartSample - float64(boundsStartSample)
+							sliceProgress := relativeSliceSample / boundsRange
+							w.audioManager.SetCursorPositionByPath(
+								w.activeWavePath,
+								sliceProgress,
+								boundsStartSample,
+								boundsEndSample,
+							)
+						}
+					}
+
+					go func(startMarker, endMarker int, path string) {
+						if err := w.audioManager.PlayWaveByPath(path, false, startMarker, endMarker); err != nil {
+							log.Warn("Play wave failed (may still be loading)", zap.Error(err))
+						}
+					}(boundsStartSample, boundsEndSample, w.activeWavePath)
+				}
+			})
+	}
+
+	// Update Stop button state
+	hasCursor := w.audioManager != nil && w.playbackState != nil && w.playbackState.GetCursorProgress() >= 0
+	stopEnabled := isPlaying || hasCursor
+	w.Components.StopButton.SetEnabled(stopEnabled)
+
+	// Update Skip buttons - only enabled when slices exist
+	_, _, slicePositions := w.Components.Wave.GetBoundsAndSlices()
+	hasSlices := len(slicePositions) > 0
+	w.Components.SkipBackButton.SetEnabled(hasSlices)
+	w.Components.SkipForwardButton.SetEnabled(hasSlices)
+
+	// Update Repeat button
+	repeatMode := 0
+	if w.playbackState != nil {
+		repeatMode = int(w.playbackState.RepeatMode)
+	}
+	if repeatMode > 0 {
+		greenColor := imgui.Vec4{X: 0.2, Y: 0.7, Z: 0.3, W: 1.0}
+		w.Components.RepeatButton.SetNormalColor(greenColor).
+			SetHoveredColor(imgui.Vec4{X: 0.25, Y: 0.8, Z: 0.35, W: 1.0}).
+			SetActiveColor(imgui.Vec4{X: 0.15, Y: 0.6, Z: 0.25, W: 1.0})
+	} else {
+		w.Components.RepeatButton.SetNormalColor(t.Style.Colors.Button.Vec4).
+			SetHoveredColor(t.Style.Colors.ButtonHovered.Vec4).
+			SetActiveColor(t.Style.Colors.ButtonActive.Vec4)
+	}
+
+	// Update Repeat button icon based on mode
+	switch repeatMode {
+	case 0:
+		w.Components.RepeatButton.SetText(font.Icon("Repeat"))
+	case 1:
+		w.Components.RepeatButton.SetText(font.Icon("Repeat") + " All")
+	case 2:
+		w.Components.RepeatButton.SetText(font.Icon("Repeat") + " 1")
+	}
+
+	// Update Playback Status Label
+	var statusText string
+	var statusColor imgui.Vec4
+	isPaused := w.playbackState != nil && w.playbackState.IsPaused
+	if isPlaying {
+		statusText = "Playing"
+		statusColor = imgui.Vec4{X: 0.2, Y: 0.8, Z: 0.3, W: 1.0}
+	} else if isPaused {
+		statusText = "Paused"
+		statusColor = imgui.Vec4{X: 0.9, Y: 0.7, Z: 0.2, W: 1.0}
+	} else {
+		statusText = "Stopped"
+		statusColor = imgui.Vec4{X: 0.6, Y: 0.6, Z: 0.6, W: 1.0}
+	}
+	// TODO: Derive from colormap
+	w.Components.PlaybackStatusLabel.
+		SetText(statusText).
+		AnimateToBgColor(statusColor)
+}
+
+// preloadPresetWavs requests async loading of all wav files in the preset
+func (w *PresetEditWindow) preloadPresetWavs(p *preset.Preset) {
+	if p == nil || w.audioManager == nil {
+		return
+	}
+
+	wavs := p.Wavs()
+
+	if len(wavs) == 0 {
+		return
+	}
+
+	for _, wav := range wavs {
+		if wav.Path != "" {
+			go func(path string) {
+				_, _ = w.audioManager.GetWaveDisplayData(path)
+			}(wav.Path)
+		}
+	}
+}
+
+func (w *PresetEditWindow) Preset() *preset.Preset {
+	return w.preset
+}
+
 func (w *PresetEditWindow) Menu() {}
+
 func (w *PresetEditWindow) Layout() {
 	w.EventRouter.ProcessEvents()
 	w.Window.ProcessUpdates()
@@ -955,443 +1458,6 @@ func (w *PresetEditWindow) Layout() {
 	imgui.EndChild()
 
 	imgui.EndChild()
-}
-
-// ensurePlaybackState ensures playback state exists with valid bounds
-func (w *PresetEditWindow) ensurePlaybackState() bool {
-	if w.activeWavePath == "" || w.Components.Wave == nil {
-		return false
-	}
-
-	boundsStart, boundsEnd, slicePositions := w.Components.Wave.GetBoundsAndSlices()
-	samplesPerBin := w.Components.Wave.GetSamplesPerBin()
-
-	// Check if bounds are valid
-	if boundsEnd <= boundsStart {
-		return false
-	}
-
-	// Create new playback state if needed, or update existing one
-	if w.playbackState == nil || w.playbackState.Path != w.activeWavePath {
-		w.playbackState = audio.NewPlaybackState(w.activeWavePath, boundsStart, boundsEnd)
-		// Tag with this window's UUID
-		w.playbackState.OwnerID = w.UUID()
-	}
-
-	// Update state with current UI values
-	w.playbackState.UpdateBoundsAndSlices(boundsStart, boundsEnd, slicePositions, samplesPerBin)
-
-	w.syncPlaybackStateToAudioManager()
-
-	return true
-}
-
-// syncPlaybackStateToAudioManager updates the audio manager's stored playback state
-func (w *PresetEditWindow) syncPlaybackStateToAudioManager() {
-	if w.audioManager == nil || w.playbackState == nil {
-		return
-	}
-
-	// Only sync if audio is currently playing and matches our active wave
-	if w.audioManager.IsPlaying() && w.playbackState.Path == w.activeWavePath {
-		// Get the stored playback state from audio manager to compare
-		storedState, exists := w.audioManager.GetPlaybackStateByPath(w.playbackState.Path)
-
-		// Check if slices have actually changed
-		slicesChanged := false
-		if !exists || storedState == nil {
-			slicesChanged = len(w.playbackState.SlicePositions) > 0
-		} else {
-			// Compare slice counts and positions
-			if len(storedState.SlicePositions) != len(w.playbackState.SlicePositions) {
-				slicesChanged = true
-			} else {
-				// Same count, check if positions differ
-				for i := range w.playbackState.SlicePositions {
-					if storedState.SlicePositions[i] != w.playbackState.SlicePositions[i] {
-						slicesChanged = true
-						break
-					}
-				}
-			}
-		}
-
-		w.audioManager.StorePlaybackState(w.playbackState)
-
-		if slicesChanged && w.playbackState.RepeatMode == audio.RepeatModeSlice {
-			currentPos := w.audioManager.GetCurrentAbsolutePosition()
-			if currentPos >= 0 {
-				w.playbackState.CursorPosition = currentPos
-			}
-
-			// Restart playback with updated state
-			_ = w.audioManager.PlayWithState(w.playbackState)
-		}
-	}
-}
-
-func (w *PresetEditWindow) onPlayFromStart() {
-	if w.audioManager == nil || w.activeWavePath == "" {
-		return
-	}
-
-	if !w.ensurePlaybackState() {
-		return
-	}
-
-	boundsStartSample, boundsEndSample, _ := w.Components.Wave.GetBoundsAndSlices()
-	w.playbackState.SliceIdx = 0
-
-	go func(startMarker, endMarker int, path string) {
-		w.audioManager.ClearCursorPosition(path)
-		if err := w.audioManager.PlayWaveByPath(path, false, startMarker, endMarker); err != nil {
-			log.Debug("Play wave failed (may still be loading)", zap.Error(err))
-		}
-	}(boundsStartSample, boundsEndSample, w.activeWavePath)
-}
-
-func (w *PresetEditWindow) onPlayPause() {
-	// Logic is in updateButtonStates
-}
-
-func (w *PresetEditWindow) onStop() {
-	if !w.ensurePlaybackState() {
-		return
-	}
-
-	w.playbackState.Stop()
-
-	go func(path string, state *audio.PlaybackState) {
-		w.audioManager.StopCurrent()
-		// Set cursor position from state
-		progress := state.GetCursorProgress()
-		w.audioManager.SetCursorPositionByPath(path, progress, state.BoundsStart, state.BoundsEnd)
-	}(w.activeWavePath, w.playbackState)
-}
-
-func (w *PresetEditWindow) onSkipBack() {
-	if !w.ensurePlaybackState() || len(w.playbackState.SlicePositions) == 0 {
-		return
-	}
-
-	currentSliceStart, _, _ := w.playbackState.GetPlaybackRegion()
-	atSliceStart := (w.playbackState.CursorPosition - currentSliceStart) < int(2.0*w.playbackState.SamplesPerBin)
-
-	// Determine target slice
-	var targetSliceIdx int
-	if atSliceStart {
-		targetSliceIdx = w.playbackState.SliceIdx - 1
-		if targetSliceIdx < 0 {
-			targetSliceIdx = len(w.playbackState.SlicePositions)
-		}
-	} else {
-		// Not at start - restart current slice
-		targetSliceIdx = w.playbackState.SliceIdx
-	}
-
-	if err := w.playbackState.NavigateToSlice(targetSliceIdx); err != nil {
-		log.Error("Failed to navigate to slice", zap.Error(err))
-		return
-	}
-
-	w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
-
-	if w.audioManager != nil && w.audioManager.IsPlaying() {
-		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
-			log.Error("Failed to apply state after skip back", zap.Error(err))
-		}
-	} else {
-		// Not playing - update audio manager cursor
-		progress := w.playbackState.GetCursorProgress()
-		w.audioManager.SetCursorPositionByPath(
-			w.activeWavePath,
-			progress,
-			w.playbackState.BoundsStart,
-			w.playbackState.BoundsEnd,
-		)
-	}
-}
-
-func (w *PresetEditWindow) onSkipForward() {
-	if !w.ensurePlaybackState() || len(w.playbackState.SlicePositions) == 0 {
-		return
-	}
-
-	nextSliceIdx := w.playbackState.SliceIdx + 1
-	if nextSliceIdx > len(w.playbackState.SlicePositions) {
-		nextSliceIdx = 0
-	}
-
-	if err := w.playbackState.NavigateToSlice(nextSliceIdx); err != nil {
-		log.Error("Failed to navigate to slice", zap.Error(err))
-		return
-	}
-
-	w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
-
-	if w.audioManager != nil && w.audioManager.IsPlaying() {
-		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
-			log.Error("Failed to apply state after skip forward", zap.Error(err))
-		}
-	} else {
-		// Not playing - update audio manager cursor
-		progress := w.playbackState.GetCursorProgress()
-		w.audioManager.SetCursorPositionByPath(
-			w.activeWavePath,
-			progress,
-			w.playbackState.BoundsStart,
-			w.playbackState.BoundsEnd,
-		)
-	}
-}
-
-func (w *PresetEditWindow) onRepeat() {
-	if !w.ensurePlaybackState() {
-		return
-	}
-
-	if w.audioManager != nil && w.audioManager.IsPlaying() {
-		currentPos := w.audioManager.GetCurrentAbsolutePosition()
-		if currentPos >= 0 {
-			w.playbackState.CursorPosition = currentPos
-		}
-	}
-
-	newMode := (w.playbackState.RepeatMode + 1) % 3
-	w.playbackState.SetRepeatMode(audio.RepeatMode(newMode))
-
-	if w.Components.Wave != nil {
-		w.Components.Wave.SetRepeatMode(int(w.playbackState.RepeatMode), w.playbackState.SliceIdx)
-	}
-
-	if w.audioManager != nil && w.audioManager.IsPlaying() {
-		if err := w.audioManager.PlayWithState(w.playbackState); err != nil {
-			log.Error("Failed to apply new repeat mode", zap.Error(err))
-		}
-	}
-}
-
-// onGeneratePeaks generates slice markers based on peak detection
-func (w *PresetEditWindow) onGeneratePeaks() {
-	if w.activeWavePath == "" || w.audioManager == nil {
-		log.Warn("Cannot generate peaks: no active wave")
-		return
-	}
-
-	// Detect peaks using the current threshold
-	peaks, err := w.audioManager.DetectPeaksForWave(w.activeWavePath, w.peakThreshold)
-	if err != nil {
-		log.Error("Failed to detect peaks", zap.Error(err))
-		return
-	}
-
-	if len(peaks) == 0 {
-		log.Info("No peaks detected with current threshold",
-			zap.Float32("threshold", w.peakThreshold))
-		return
-	}
-
-	// Convert peak positions to WaveMarker objects
-	slices := make([]*waveform.WaveMarker, len(peaks))
-	for i, peakPos := range peaks {
-		slices[i] = waveform.NewWaveMarker(peakPos)
-	}
-
-	// Apply peaks as slice markers to the waveform
-	if w.Components.Wave != nil {
-		w.Components.Wave.SetSlices(slices)
-	}
-}
-
-// updateButtonStates updates button text, enabled state, and colors based on playback state
-func (w *PresetEditWindow) updateButtonStates(isPlaying bool) {
-	// TODO: Rethink this, it's getting messy
-
-	t := theme.GetCurrentTheme()
-
-	if isPlaying {
-		w.Components.PlayPauseButton.
-			SetText(font.Icon("Pause")).
-			SetOnClick(func() {
-				if w.audioManager != nil && w.playbackState != nil {
-					// Get current position before pausing
-					currentPos := w.audioManager.GetCurrentAbsolutePosition()
-					// Update playback state
-					w.playbackState.Pause(currentPos)
-					// Pause audio
-					w.audioManager.PauseCurrent()
-				}
-			})
-	} else {
-		w.Components.PlayPauseButton.
-			SetText(font.Icon("Play")).
-			SetOnClick(func() {
-				if w.audioManager != nil && w.activeWavePath != "" {
-					// Ensure playback state is initialized with valid bounds
-					if !w.ensurePlaybackState() {
-						return
-					}
-
-					boundsStartSample, boundsEndSample, slicePositions := w.Components.Wave.GetBoundsAndSlices()
-
-					if len(slicePositions) > 0 {
-						samplesPerBin := w.Components.Wave.GetSamplesPerBin()
-
-						if samplesPerBin == 0 {
-							return
-						}
-
-						boundsRange := float64(boundsEndSample - boundsStartSample)
-						boundsStartBin := float64(boundsStartSample) / samplesPerBin
-						currentProgress := float64(0)
-
-						if w.playbackState != nil {
-							currentProgress = w.playbackState.GetCursorProgress()
-						}
-
-						isPaused := currentProgress > 0
-						if isPaused {
-							currentSample := currentProgress * boundsRange
-							currentBin := (float64(boundsStartSample) + currentSample) / samplesPerBin
-							currentSliceIdx := 0
-							for i := 0; i < len(slicePositions); i++ {
-								if currentBin >= slicePositions[i]-0.5 {
-									currentSliceIdx = i + 1
-								}
-							}
-							sliceIdx := 0
-							if w.playbackState != nil {
-								sliceIdx = w.playbackState.SliceIdx
-							}
-							if currentSliceIdx != sliceIdx {
-								var sliceStartBin float64
-								if sliceIdx > 0 && sliceIdx <= len(slicePositions) {
-									sliceStartBin = slicePositions[sliceIdx-1]
-								} else {
-									sliceStartBin = boundsStartBin
-								}
-								sliceStartSample := sliceStartBin * samplesPerBin
-								relativeSliceSample := sliceStartSample - float64(boundsStartSample)
-								sliceProgress := relativeSliceSample / boundsRange
-								w.audioManager.SetCursorPositionByPath(
-									w.activeWavePath,
-									sliceProgress,
-									boundsStartSample,
-									boundsEndSample,
-								)
-							}
-						} else if w.playbackState != nil && w.playbackState.RepeatMode == 2 {
-							var sliceStartBin float64
-							boundsStartBin := float64(boundsStartSample) / samplesPerBin
-							sliceIdx := w.playbackState.SliceIdx
-
-							if sliceIdx > 0 && sliceIdx <= len(slicePositions) {
-								sliceStartBin = slicePositions[sliceIdx-1]
-							} else {
-								sliceStartBin = boundsStartBin
-							}
-
-							sliceStartSample := sliceStartBin * samplesPerBin
-							relativeSliceSample := sliceStartSample - float64(boundsStartSample)
-							sliceProgress := relativeSliceSample / boundsRange
-							w.audioManager.SetCursorPositionByPath(
-								w.activeWavePath,
-								sliceProgress,
-								boundsStartSample,
-								boundsEndSample,
-							)
-						}
-					}
-
-					go func(startMarker, endMarker int, path string) {
-						if err := w.audioManager.PlayWaveByPath(path, false, startMarker, endMarker); err != nil {
-							log.Warn("Play wave failed (may still be loading)", zap.Error(err))
-						}
-					}(boundsStartSample, boundsEndSample, w.activeWavePath)
-				}
-			})
-	}
-
-	// Update Stop button state
-	hasCursor := w.audioManager != nil && w.playbackState != nil && w.playbackState.GetCursorProgress() >= 0
-	stopEnabled := isPlaying || hasCursor
-	w.Components.StopButton.SetEnabled(stopEnabled)
-
-	// Update Skip buttons - only enabled when slices exist
-	_, _, slicePositions := w.Components.Wave.GetBoundsAndSlices()
-	hasSlices := len(slicePositions) > 0
-	w.Components.SkipBackButton.SetEnabled(hasSlices)
-	w.Components.SkipForwardButton.SetEnabled(hasSlices)
-
-	// Update Repeat button
-	repeatMode := 0
-	if w.playbackState != nil {
-		repeatMode = int(w.playbackState.RepeatMode)
-	}
-	if repeatMode > 0 {
-		greenColor := imgui.Vec4{X: 0.2, Y: 0.7, Z: 0.3, W: 1.0}
-		w.Components.RepeatButton.SetNormalColor(greenColor).
-			SetHoveredColor(imgui.Vec4{X: 0.25, Y: 0.8, Z: 0.35, W: 1.0}).
-			SetActiveColor(imgui.Vec4{X: 0.15, Y: 0.6, Z: 0.25, W: 1.0})
-	} else {
-		w.Components.RepeatButton.SetNormalColor(t.Style.Colors.Button.Vec4).
-			SetHoveredColor(t.Style.Colors.ButtonHovered.Vec4).
-			SetActiveColor(t.Style.Colors.ButtonActive.Vec4)
-	}
-
-	// Update Repeat button icon based on mode
-	switch repeatMode {
-	case 0:
-		w.Components.RepeatButton.SetText(font.Icon("Repeat"))
-	case 1:
-		w.Components.RepeatButton.SetText(font.Icon("Repeat") + " All")
-	case 2:
-		w.Components.RepeatButton.SetText(font.Icon("Repeat") + " 1")
-	}
-
-	// Update Playback Status Label
-	var statusText string
-	var statusColor imgui.Vec4
-	isPaused := w.playbackState != nil && w.playbackState.IsPaused
-	if isPlaying {
-		statusText = "Playing"
-		statusColor = imgui.Vec4{X: 0.2, Y: 0.8, Z: 0.3, W: 1.0}
-	} else if isPaused {
-		statusText = "Paused"
-		statusColor = imgui.Vec4{X: 0.9, Y: 0.7, Z: 0.2, W: 1.0}
-	} else {
-		statusText = "Stopped"
-		statusColor = imgui.Vec4{X: 0.6, Y: 0.6, Z: 0.6, W: 1.0}
-	}
-	// TODO: Derive from colormap
-	w.Components.PlaybackStatusLabel.
-		SetText(statusText).
-		AnimateToBgColor(statusColor)
-}
-
-func (w *PresetEditWindow) Preset() *preset.Preset {
-	return w.preset
-}
-
-// preloadPresetWavs requests async loading of all wav files in the preset
-func (w *PresetEditWindow) preloadPresetWavs(p *preset.Preset) {
-	if p == nil || w.audioManager == nil {
-		return
-	}
-
-	wavs := p.Wavs()
-
-	if len(wavs) == 0 {
-		return
-	}
-
-	for _, wav := range wavs {
-		if wav.Path != "" {
-			go func(path string) {
-				_, _ = w.audioManager.GetWaveDisplayData(path)
-			}(wav.Path)
-		}
-	}
 }
 
 func (w *PresetEditWindow) Destroy() {

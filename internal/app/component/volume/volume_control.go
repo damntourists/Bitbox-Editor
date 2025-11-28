@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/AllenDang/cimgui-go/imgui"
-	"go.uber.org/zap"
 )
 
 var log = logging.NewLogger("volume")
@@ -37,7 +36,7 @@ func NewVolumeControlWithID(id imgui.ID) *VolumeControlComponent {
 		handleRadius: 4,
 	}
 
-	vc.Component = component.NewComponent[*VolumeControlComponent](id, vc.HandleUpdate)
+	vc.Component = component.NewComponent[*VolumeControlComponent](id)
 	vc.Component.SetLayoutBuilder(vc)
 
 	vc.SetVolume(0.8)
@@ -132,14 +131,6 @@ func (vc *VolumeControlComponent) ToggleMute() {
 	if vc.onMuteToggle != nil {
 		vc.onMuteToggle(newMuted)
 	}
-}
-
-func (vc *VolumeControlComponent) HandleUpdate(cmd component.UpdateCmd) {
-	if vc.Component.HandleGlobalUpdate(cmd) {
-		return
-	}
-
-	log.Warn("VolumeControlComponent unhandled update", zap.String("id", vc.IDStr()), zap.Any("cmd", cmd))
 }
 
 func (vc *VolumeControlComponent) Layout() {

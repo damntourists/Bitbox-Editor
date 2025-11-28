@@ -43,7 +43,7 @@ type StorageLocationsPayload struct {
 // StorageWindow is a window that displays available drives/storage.
 type StorageWindow struct {
 	*window.Window[*StorageWindow]
-	eventRouter eventbus.EventRouter
+	eventbus.EventRouter
 	component.CommandRouter
 
 	// Child Components
@@ -86,8 +86,8 @@ func NewStorageWindow() *StorageWindow {
 
 	uuid := w.UUID()
 
-	w.eventRouter.Init(uuid)
-	w.eventRouter.OnEvent(events.ComponentClickEventKey, w.onClick)
+	w.EventRouter.Init(uuid)
+	w.EventRouter.OnEvent(events.ComponentClickEventKey, w.onClick)
 
 	w.CommandRouter.Init(w.Window)
 	component.OnCommandTyped(&w.CommandRouter, cmdStorageSetLocations, w.onSetLocations)
@@ -306,7 +306,7 @@ func (w *StorageWindow) onClick(event events.Event) {
 }
 
 func (w *StorageWindow) Layout() {
-	w.eventRouter.ProcessEvents()
+	w.EventRouter.ProcessEvents()
 	w.Window.ProcessUpdates()
 
 	isLoading := w.Loading()
@@ -354,7 +354,7 @@ func (w *StorageWindow) Destroy() {
 	log.Debug("Drive monitor stopped.")
 
 	// Unsubscribe from all events
-	w.eventRouter.Destroy()
+	w.EventRouter.Destroy()
 
 	// Destroy child components
 	if w.driveTable != nil {

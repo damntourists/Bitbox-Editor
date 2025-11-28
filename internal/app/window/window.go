@@ -43,19 +43,13 @@ type (
 		layoutBuilder WindowLayoutBuilder
 
 		updates chan UpdateCmd
-		handler UpdateHandlerFunc
 
 		// Command handler registry for custom commands
 		commandHandlers map[any]func(UpdateCmd)
 	}
 )
 
-func NewWindow[T WindowType](title, icon string, handler ...UpdateHandlerFunc) *Window[T] {
-	var h UpdateHandlerFunc
-	if len(handler) > 0 {
-		h = handler[0]
-	}
-
+func NewWindow[T WindowType](title, icon string) *Window[T] {
 	return &Window[T]{
 		uuid:            uuid.NewString(),
 		noClose:         false,
@@ -65,35 +59,20 @@ func NewWindow[T WindowType](title, icon string, handler ...UpdateHandlerFunc) *
 		icon:            icon,
 		flags:           imgui.WindowFlagsNone,
 		updates:         make(chan cmp.UpdateCmd, 100),
-		handler:         h,
 		commandHandlers: make(map[any]func(UpdateCmd)),
 	}
 }
 
 func (w *Window[T]) ProcessUpdates() {
-	if w.handler == nil && len(w.commandHandlers) == 0 {
-		for {
-			select {
-			case <-w.updates:
-				// discard update
-			default:
-				return
-			}
-		}
-	}
-
 	const maxMessagesPerFrame = 100
 	processedCount := 0
 
 	for processedCount < maxMessagesPerFrame {
 		select {
 		case cmd := <-w.updates:
-			// Try registered handlers first
+			// Try registered handlers
 			if handler, ok := w.commandHandlers[cmd.Type]; ok {
 				handler(cmd)
-			} else if w.handler != nil {
-				// Fall back to the legacy handler for backward compatibility
-				w.handler(cmd)
 			}
 			processedCount++
 		default:
@@ -172,7 +151,7 @@ func (w *Window[T]) HandleGlobalUpdate(cmd UpdateCmd) bool {
 	}
 }
 
-func (w *Window[T]) UpdateChannel() chan<- cmp.UpdateCmd { // Add UpdateChannel
+func (w *Window[T]) UpdateChannel() chan<- cmp.UpdateCmd {
 	return w.updates
 }
 
