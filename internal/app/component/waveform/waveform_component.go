@@ -80,6 +80,8 @@ func NewWaveformComponent(id imgui.ID) *WaveComponent {
 	cmp.EventRouter.Init(cmp.UUID())
 	cmp.OnEvent(events.AudioPlaybackProgressKey, cmp.onPlaybackEvent)
 	cmp.OnEvent(events.AudioPlaybackStartedKey, cmp.onPlaybackEvent)
+	cmp.OnEvent(events.AudioPlaybackPausedKey, cmp.onPlaybackEvent)
+	cmp.OnEvent(events.AudioPlaybackResumedKey, cmp.onPlaybackEvent)
 	cmp.OnEvent(events.AudioPlaybackStoppedKey, cmp.onPlaybackEvent)
 	cmp.OnEvent(events.AudioPlaybackFinishedKey, cmp.onPlaybackEvent)
 
@@ -190,6 +192,10 @@ func (wc *WaveComponent) handleUserInteraction(xMin, xMax float64) {
 		imgui.IsMouseDragging(imgui.MouseButtonRight) ||
 		imgui.IsMouseDragging(imgui.MouseButtonMiddle)
 
+	// Debug middle mouse detection
+	middleClicked := imgui.IsMouseClickedBool(imgui.MouseButtonMiddle)
+	plotHovered := implot.IsPlotHovered()
+
 	if implot.IsPlotHovered() && imgui.IsMouseClickedBool(imgui.MouseButtonLeft) && !isDragging {
 		mp := implot.GetPlotMousePos()
 		x := mp.X
@@ -245,9 +251,10 @@ func (wc *WaveComponent) handleUserInteraction(xMin, xMax float64) {
 	}
 
 	// Middle-click to add slice markers - only if not dragging
-	if implot.IsPlotHovered() && imgui.IsMouseClickedBool(imgui.MouseButtonMiddle) && !isDragging {
+	if plotHovered && middleClicked && !isDragging {
 		mp := implot.GetPlotMousePos()
 		x := math.Round(mp.X)
+
 		if x < minBound {
 			x = minBound
 		}
@@ -790,7 +797,8 @@ func (wc *WaveComponent) ClearSlices() {
 }
 
 func (wc *WaveComponent) AddSlice(marker *WaveMarker) {
-	cmd := component.UpdateCmd{Type: cmdAddWaveSlice, Data: marker}
+	// Send the position as float64, not the marker itself
+	cmd := component.UpdateCmd{Type: cmdAddWaveSlice, Data: marker.start}
 	wc.SendUpdate(cmd)
 }
 
