@@ -5,10 +5,13 @@ import (
 )
 
 func TestOwnedEvent_AudioPlaybackEventRecord_GetOwnerID(t *testing.T) {
-	event := AudioPlaybackEventRecord{
-		EventType: AudioPlaybackStartedEvent,
-		Path:      "/test/audio.wav",
-		OwnerID:   "window-123",
+	event := AudioPlaybackStartedEvent{
+		AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+			AudioPlaybackBase: AudioPlaybackBase{
+				Path:    "/test/audio.wav",
+				OwnerID: "window-123",
+			},
+		},
 	}
 
 	ownerID := event.GetOwnerID()
@@ -18,10 +21,13 @@ func TestOwnedEvent_AudioPlaybackEventRecord_GetOwnerID(t *testing.T) {
 }
 
 func TestOwnedEvent_AudioPlaybackEventRecord_EmptyOwnerID(t *testing.T) {
-	event := AudioPlaybackEventRecord{
-		EventType: AudioPlaybackStartedEvent,
-		Path:      "/test/audio.wav",
-		OwnerID:   "",
+	event := AudioPlaybackStartedEvent{
+		AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+			AudioPlaybackBase: AudioPlaybackBase{
+				Path:    "/test/audio.wav",
+				OwnerID: "",
+			},
+		},
 	}
 
 	ownerID := event.GetOwnerID()
@@ -31,9 +37,15 @@ func TestOwnedEvent_AudioPlaybackEventRecord_EmptyOwnerID(t *testing.T) {
 }
 
 func TestOwnedEvent_MidiPlaybackEventRecord_GetOwnerID(t *testing.T) {
-	event := MidiPlaybackEventRecord{
-		EventType: MidiPlaybackNoteOnEvent,
-		OwnerID:   "midi-controller-456",
+	event := MidiPlaybackNoteOnEvent{
+		MidiPlaybackMessageBase: MidiPlaybackMessageBase{
+			MidiPlaybackBase: MidiPlaybackBase{
+				OwnerID: "midi-controller-456",
+			},
+			Channel: 0,
+		},
+		Note:     60,
+		Velocity: 100,
 	}
 
 	ownerID := event.GetOwnerID()
@@ -56,31 +68,89 @@ func TestOwnedEvent_PadGridSelectEvent_GetOwnerID(t *testing.T) {
 
 func TestEventTypes_AudioPlaybackEventRecord_Type(t *testing.T) {
 	tests := []struct {
-		eventType AudioPlaybackEvent
-		expected  string
+		name     string
+		event    Event
+		expected string
 	}{
-		{AudioPlaybackStartedEvent, AudioPlaybackStartedKey},
-		{AudioPlaybackProgressEvent, AudioPlaybackProgressKey},
-		{AudioPlaybackStoppedEvent, AudioPlaybackStoppedKey},
-		{AudioPlaybackPausedEvent, AudioPlaybackPausedKey},
-		{AudioPlaybackResumedEvent, AudioPlaybackResumedKey},
-		{AudioPlaybackFinishedEvent, AudioPlaybackFinishedKey},
+		{
+			"AudioPlaybackStarted",
+			AudioPlaybackStartedEvent{
+				AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+					AudioPlaybackBase: AudioPlaybackBase{
+						Path:    "/test/audio.wav",
+						OwnerID: "test",
+					},
+				},
+			},
+			AudioPlaybackStartedKey,
+		},
+		{
+			"AudioPlaybackProgress",
+			AudioPlaybackProgressEvent{
+				AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+					AudioPlaybackBase: AudioPlaybackBase{
+						Path:    "/test/audio.wav",
+						OwnerID: "test",
+					},
+					Progress: 0.5,
+				},
+			},
+			AudioPlaybackProgressKey,
+		},
+		{
+			"AudioPlaybackStopped",
+			AudioPlaybackStoppedEvent{
+				AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+					AudioPlaybackBase: AudioPlaybackBase{
+						Path:    "/test/audio.wav",
+						OwnerID: "test",
+					},
+				},
+			},
+			AudioPlaybackStoppedKey,
+		},
+		{
+			"AudioPlaybackPaused",
+			AudioPlaybackPausedEvent{
+				AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+					AudioPlaybackBase: AudioPlaybackBase{
+						Path:    "/test/audio.wav",
+						OwnerID: "test",
+					},
+				},
+			},
+			AudioPlaybackPausedKey,
+		},
+		{
+			"AudioPlaybackResumed",
+			AudioPlaybackResumedEvent{
+				AudioPlaybackProgressBase: AudioPlaybackProgressBase{
+					AudioPlaybackBase: AudioPlaybackBase{
+						Path:    "/test/audio.wav",
+						OwnerID: "test",
+					},
+				},
+			},
+			AudioPlaybackResumedKey,
+		},
+		{
+			"AudioPlaybackFinished",
+			AudioPlaybackFinishedEvent{
+				AudioPlaybackBase: AudioPlaybackBase{
+					Path:    "/test/audio.wav",
+					OwnerID: "test",
+				},
+			},
+			AudioPlaybackFinishedKey,
+		},
 	}
 
 	for _, tt := range tests {
-		event := AudioPlaybackEventRecord{EventType: tt.eventType}
-		if event.Type() != tt.expected {
-			t.Errorf("Event type %d: expected %s, got %s",
-				tt.eventType, tt.expected, event.Type())
-		}
-	}
-}
-
-func TestEventTypes_AudioPlaybackEventRecord_UnknownType(t *testing.T) {
-	event := AudioPlaybackEventRecord{EventType: AudioPlaybackEvent(999)}
-	eventType := event.Type()
-	if eventType != "audio.playback.unknown" {
-		t.Errorf("Expected 'audio.playback.unknown', got '%s'", eventType)
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.event.Type() != tt.expected {
+				t.Errorf("Expected %s, got %s", tt.expected, tt.event.Type())
+			}
+		})
 	}
 }
 
@@ -94,40 +164,123 @@ func TestEventTypes_PadGridSelectEvent_Type(t *testing.T) {
 
 func TestEventTypes_MidiPlaybackEventRecord_Type(t *testing.T) {
 	tests := []struct {
-		eventType MidiPlaybackEvent
-		expected  string
+		name     string
+		event    Event
+		expected string
 	}{
-		{MidiPlaybackNoteOnEvent, MidiPlaybackNoteOnKey},
-		{MidiPlaybackNoteOffEvent, MidiPlaybackNoteOffKey},
-		{MidiPlaybackCCEvent, MidiPlaybackCCKey},
-		{MidiPlaybackCCEvent, MidiPlaybackCCKey},
+		{
+			"MidiPlaybackStarted",
+			MidiPlaybackStartedEvent{
+				MidiPlaybackBase: MidiPlaybackBase{
+					OwnerID: "test",
+				},
+			},
+			MidiPlaybackStartedKey,
+		},
+		{
+			"MidiPlaybackStopped",
+			MidiPlaybackStoppedEvent{
+				MidiPlaybackBase: MidiPlaybackBase{
+					OwnerID: "test",
+				},
+			},
+			MidiPlaybackStoppedKey,
+		},
+		{
+			"MidiPlaybackNoteOn",
+			MidiPlaybackNoteOnEvent{
+				MidiPlaybackMessageBase: MidiPlaybackMessageBase{
+					MidiPlaybackBase: MidiPlaybackBase{
+						OwnerID: "test",
+					},
+					Channel: 0,
+				},
+				Note:     60,
+				Velocity: 100,
+			},
+			MidiPlaybackNoteOnKey,
+		},
+		{
+			"MidiPlaybackNoteOff",
+			MidiPlaybackNoteOffEvent{
+				MidiPlaybackMessageBase: MidiPlaybackMessageBase{
+					MidiPlaybackBase: MidiPlaybackBase{
+						OwnerID: "test",
+					},
+					Channel: 0,
+				},
+				Note:     60,
+				Velocity: 0,
+			},
+			MidiPlaybackNoteOffKey,
+		},
+		{
+			"MidiPlaybackCC",
+			MidiPlaybackCCEvent{
+				MidiPlaybackMessageBase: MidiPlaybackMessageBase{
+					MidiPlaybackBase: MidiPlaybackBase{
+						OwnerID: "test",
+					},
+					Channel: 0,
+				},
+				CC:    7,
+				Value: 127,
+			},
+			MidiPlaybackCCKey,
+		},
 	}
 
 	for _, tt := range tests {
-		event := MidiPlaybackEventRecord{EventType: tt.eventType}
-		if event.Type() != tt.expected {
-			t.Errorf("MIDI event type %d: expected %s, got %s",
-				tt.eventType, tt.expected, event.Type())
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.event.Type() != tt.expected {
+				t.Errorf("Expected %s, got %s", tt.expected, tt.event.Type())
+			}
+		})
 	}
 }
 
 func TestEventTypes_AudioLoadEventRecord_Type(t *testing.T) {
 	tests := []struct {
-		eventType AudioLoadEvent
-		expected  string
+		name     string
+		event    Event
+		expected string
 	}{
-		{AudioMetadataLoadedEvent, AudioMetadataLoadedKey},
-		{AudioSamplesLoadedEvent, AudioSamplesLoadedKey},
-		{AudioLoadFailedEvent, AudioLoadFailedKey},
+		{
+			"AudioMetadataLoaded",
+			AudioMetadataLoadedEvent{
+				AudioLoadBase: AudioLoadBase{
+					Path: "/test/audio.wav",
+				},
+			},
+			AudioMetadataLoadedKey,
+		},
+		{
+			"AudioSamplesLoaded",
+			AudioSamplesLoadedEvent{
+				AudioLoadBase: AudioLoadBase{
+					Path: "/test/audio.wav",
+				},
+			},
+			AudioSamplesLoadedKey,
+		},
+		{
+			"AudioLoadFailed",
+			AudioLoadFailedEvent{
+				AudioLoadBase: AudioLoadBase{
+					Path: "/test/audio.wav",
+				},
+				Error: nil,
+			},
+			AudioLoadFailedKey,
+		},
 	}
 
 	for _, tt := range tests {
-		event := AudioLoadEventRecord{EventType: tt.eventType}
-		if event.Type() != tt.expected {
-			t.Errorf("Audio load event type %d: expected %s, got %s",
-				tt.eventType, tt.expected, event.Type())
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.event.Type() != tt.expected {
+				t.Errorf("Expected %s, got %s", tt.expected, tt.event.Type())
+			}
+		})
 	}
 }
 
