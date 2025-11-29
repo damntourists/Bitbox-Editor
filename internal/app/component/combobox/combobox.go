@@ -1,10 +1,19 @@
-package combobox
-
 /*
-╭────────────────────╮
-│ Combobox Component │
-╰────────────────────╯
+COMPONENT: COMBOBOX
+
+	    A dropdown selection component. Broadcasts changes via
+	    the global EventBus.
+
+	    ┌──────────────────────┐      ┌───────────────────────┐
+	    │ ⊞ Preview Text     ▼ │  ─▶  │ ⊞ Preview Text      ▼ │
+	    └──────────────────────┘      │┌─────────────────────┐│
+	           (Collapsed)            ││ Option A            ││
+									  ││ Option B            ││
+									  │└─────────────────────┘│
+									  └───────────────────────┘
+											  (Expanded)
 */
+package combobox
 
 import (
 	"bitbox-editor/internal/app/component"
@@ -19,6 +28,23 @@ import (
 
 var log = logging.NewLogger("combobox")
 
+/*
+┌────────────────────────────────────────────────────────────┐
+│ ComboBoxComponent                                          │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ *component.Component[*Button]                        │  │
+│  │  • Animation Engine                                  │  │
+│  │  • Event Bus (interaction events)                    │  │
+│  │  • Update Command Queue (thread-safe updates)        │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ component.CommandRouter                              │  │
+│  │  • Cmd -> Handler Mapping                            │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  • Local State: Items[], Selected(int), Preview(string)    │
+│  • Output: ComboboxSelectionChangeEvent (Global)           │
+└────────────────────────────────────────────────────────────┘
+*/
 type ComboBoxComponent struct {
 	*component.Component[*ComboBoxComponent]
 	component.CommandRouter
@@ -32,6 +58,17 @@ type ComboBoxComponent struct {
 	flags imgui.ComboFlags
 }
 
+/*
+COMMAND ROUTING
+╭────────────────────────┬───────────────────────────────────╮
+│ Command Type           │ Handler Method                    │
+├────────────────────────┼───────────────────────────────────┤
+│ cmdSetComboBoxItems    │ onSetItems( []string )            │
+│ cmdSetComboBoxSelected │ onSetSelected( int32 )            │
+│ cmdSetComboBoxPreview  │ onSetPreview( string )            │
+│ cmdSetComboBoxFlags    │ onSetFlags( imgui.ComboFlags )    │
+╰────────────────────────┴───────────────────────────────────╯
+*/
 func NewComboBoxComponent(id imgui.ID, label string) *ComboBoxComponent {
 	cmp := &ComboBoxComponent{
 		label:    label,

@@ -1,23 +1,35 @@
-package button
-
 /*
-╭──────────────────╮
-│ Button Component │
-╰──────────────────╯
+COMPONENT: BUTTON
+
+		A standard UI button with support for toggle states, animations,
+		and theming. Embeds the base Component system.
+
+	  • States: Normal, Hovered, Active, Toggled
 */
+package button
 
 import (
 	"bitbox-editor/internal/app/animation"
 	"bitbox-editor/internal/app/component"
 	"bitbox-editor/internal/app/theme"
-	"bitbox-editor/internal/logging"
 	"strconv"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 )
 
-var log = logging.NewLogger("button")
-
+/*
+┌────────────────────────────────────────────────────────────┐
+│ Button                                                     │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ *component.Component[*Button]                        │  │
+│  │  • Animation Engine                                  │  │
+│  │  • Event Bus (click/hover events)                    │  │
+│  │  • Update Command Queue (Thread-safe updates)        │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  • States: Toggled, Text, Outline                          │
+│  • Input: InvisibleButtonV                                 │
+└────────────────────────────────────────────────────────────┘
+*/
 type Button struct {
 	*component.Component[*Button]
 
