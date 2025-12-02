@@ -1,17 +1,17 @@
 /*
 COMPONENT: COMBOBOX
 
-	    A dropdown selection component. Broadcasts changes via
-	    the global EventBus.
+		    A dropdown selection component. Broadcasts changes via
+		    the global EventBus.
 
-	    ┌──────────────────────┐      ┌───────────────────────┐
-	    │ ⊞ Preview Text     ▼ │  ─▶  │ ⊞ Preview Text      ▼ │
-	    └──────────────────────┘      │┌─────────────────────┐│
-	           (Collapsed)            ││ Option A            ││
-									  ││ Option B            ││
-									  │└─────────────────────┘│
-									  └───────────────────────┘
-											  (Expanded)
+		    ┌────────────────────┐      ┌─────────────────────┐
+		    │ Preview Text     ▼ │  ─▶  │ Preview Text      ▼ │
+		    └────────────────────┘      │┌───────────────────┐│
+	             (Collapsed)            ││ Option A          ││
+	                                    ││ Option B          ││
+	                                    │└───────────────────┘│
+	                                    └─────────────────────┘
+	                                          (Expanded)
 */
 package combobox
 
@@ -19,7 +19,6 @@ import (
 	"bitbox-editor/internal/app/component"
 	"bitbox-editor/internal/app/eventbus"
 	"bitbox-editor/internal/app/events"
-	"bitbox-editor/internal/app/font"
 	"bitbox-editor/internal/logging"
 	"fmt"
 
@@ -96,7 +95,7 @@ func (c *ComboBoxComponent) onSetSelected(newIndex int32) {
 	c.selected = newIndex
 	// Update preview text when selection changes
 	if newIndex >= 0 && int(newIndex) < len(c.items) {
-		c.preview = fmt.Sprintf("%s %s", font.Icon("Grid3x2"), c.items[c.selected])
+		c.preview = fmt.Sprintf("%s", c.items[c.selected])
 	}
 }
 
